@@ -1092,3 +1092,23 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 <p align="center">
   <sub>nanobot is for educational, research, and technical exchange purposes only</sub>
 </p>
+
+## 🎮 Game Customer Service Extension
+
+This repository includes an extension module `nanobot.game_cs` for game support while keeping the main nanobot framework unchanged.
+
+Capabilities:
+
+- account binding flow with screenshot + UID + server + confirmation
+- step-by-step user guidance for in-game support workflows
+- OpenViking-backed knowledge retrieval for support answers
+
+Quick start:
+
+```bash
+pip install -e .
+export GAME_CS_SERVICE_TOKEN="replace-with-strong-token"
+python -m nanobot.game_cs.service --host 0.0.0.0 --port 8011
+```
+
+Full guide: [`docs/GAME_CUSTOMER_SERVICE.md`](docs/GAME_CUSTOMER_SERVICE.md)
