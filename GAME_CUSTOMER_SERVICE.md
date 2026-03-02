@@ -10,8 +10,7 @@
 
 ```bash
 cd /path/to/nanobot-game-cs
-pip install -e .
-pip install openviking fastapi uvicorn[standard]
+pip install -e ".[game_cs]"
 ```
 
 ## 2. 环境变量
@@ -23,6 +22,7 @@ export GAME_CS_UPLOADS_DIR=".nanobot/game_cs_uploads"
 export GAME_CS_OPENVIKING_PATH=".nanobot/openviking_data"
 export GAME_CS_OPENVIKING_TARGET_URI="viking://resources/game-kb/"
 export GAME_CS_BIND_STEPS="发送截图|发送游戏UID|发送游戏区服|确认绑定"
+export GAME_CS_MAX_IMAGE_BYTES=5242880
 ```
 
 ## 3. 灌入知识库

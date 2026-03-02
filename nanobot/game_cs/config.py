@@ -13,6 +13,7 @@ class GameCSConfig:
     openviking_path: Path
     openviking_target_uri: str
     bind_steps: list[str]
+    max_image_bytes: int
 
     @staticmethod
     def from_env() -> "GameCSConfig":
@@ -21,6 +22,8 @@ class GameCSConfig:
             "发送截图|发送游戏UID|发送游戏区服|确认绑定",
         )
         steps = [x.strip() for x in raw_steps.split("|") if x.strip()]
+        if len(steps) < 4:
+            raise ValueError("GAME_CS_BIND_STEPS must contain at least 4 steps")
         return GameCSConfig(
             service_token=os.getenv("GAME_CS_SERVICE_TOKEN", "dev-token"),
             db_path=Path(os.getenv("GAME_CS_DB_PATH", ".nanobot/game_cs.db")),
@@ -28,4 +31,5 @@ class GameCSConfig:
             openviking_path=Path(os.getenv("GAME_CS_OPENVIKING_PATH", ".nanobot/openviking_data")),
             openviking_target_uri=os.getenv("GAME_CS_OPENVIKING_TARGET_URI", "viking://resources/"),
             bind_steps=steps,
+            max_image_bytes=int(os.getenv("GAME_CS_MAX_IMAGE_BYTES", str(5 * 1024 * 1024))),
         )

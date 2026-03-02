@@ -5,8 +5,8 @@ import base64
 import hashlib
 import re
 from datetime import datetime, timezone
-from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, Header, HTTPException
 
 from .config import GameCSConfig
@@ -15,6 +15,8 @@ from .openviking_kb import OpenVikingKB
 from .storage import GameCSStore
 
 UID_PATTERN = re.compile(r"\b\d{6,20}\b")
+SAFE_USER_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+ALLOWED_IMAGE_EXTS = {"png", "jpg", "jpeg", "webp"}
 
 
 def _now() -> datetime:
@@ -39,17 +41,59 @@ def _extract_server(text: str) -> str | None:
     return None
 
 
-def _persist_screenshot(cfg: GameCSConfig, payload: GameMessageIn) -> str | None:
-    if not payload.screenshot_b64:
+def _safe_user_id(user_id: str) -> str:
+    if not SAFE_USER_ID.fullmatch(user_id):
+        raise HTTPException(status_code=400, detail="invalid user_id")
+    return user_id
+
+
+def _resolve_ext(ext: str) -> str:
+    clean = ext.strip(".").lower()
+    if clean not in ALLOWED_IMAGE_EXTS:
+        raise HTTPException(status_code=400, detail="invalid screenshot_ext")
+    return clean
+
+
+def _load_screenshot_bytes(cfg: GameCSConfig, payload: GameMessageIn) -> bytes | None:
+    if payload.screenshot_b64:
+        if len(payload.screenshot_b64) > (cfg.max_image_bytes * 2):
+            raise HTTPException(status_code=413, detail="screenshot too large")
+        try:
+            raw = base64.b64decode(payload.screenshot_b64, validate=True)
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid screenshot_b64")
+        if len(raw) > cfg.max_image_bytes:
+            raise HTTPException(status_code=413, detail="screenshot too large")
+        return raw
+    if not payload.screenshot_url:
         return None
+
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get(payload.screenshot_url)
+            resp.raise_for_status()
+            raw = resp.content
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid screenshot_url")
+    if len(raw) > cfg.max_image_bytes:
+        raise HTTPException(status_code=413, detail="screenshot too large")
+    return raw
+
+
+def _persist_screenshot(cfg: GameCSConfig, payload: GameMessageIn) -> str | None:
+    raw = _load_screenshot_bytes(cfg, payload)
+    if raw is None:
+        return None
+
     cfg.uploads_dir.mkdir(parents=True, exist_ok=True)
     try:
-        raw = base64.b64decode(payload.screenshot_b64, validate=True)
-    except Exception:
-        return None
+        user_id = _safe_user_id(payload.user_id)
+        ext = _resolve_ext(payload.screenshot_ext)
+    except HTTPException:
+        raise
+
     digest = hashlib.sha256(raw).hexdigest()[:16]
-    ext = payload.screenshot_ext.strip(".").lower() or "png"
-    path = cfg.uploads_dir / f"{payload.user_id}_{digest}.{ext}"
+    path = cfg.uploads_dir / f"{user_id}_{digest}.{ext}"
     path.write_bytes(raw)
     return str(path)
 
@@ -87,6 +131,7 @@ def create_app(config: GameCSConfig | None = None) -> FastAPI:
     def on_message(payload: GameMessageIn, x_game_cs_token: str | None = Header(default=None)) -> GameReply:
         if x_game_cs_token != cfg.service_token:
             raise HTTPException(status_code=401, detail="invalid token")
+        _safe_user_id(payload.user_id)
 
         user_text = payload.message.strip()
         store.append_message(payload.user_id, "user", user_text or "<empty>")
