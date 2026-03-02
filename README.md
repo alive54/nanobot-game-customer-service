@@ -1106,9 +1106,9 @@ Capabilities:
 Quick start:
 
 ```bash
-pip install -e .
+pip install -e ".[game_cs]"
 export GAME_CS_SERVICE_TOKEN="replace-with-strong-token"
 python -m nanobot.game_cs.service --host 0.0.0.0 --port 8011
 ```
 
-Full guide: [`docs/GAME_CUSTOMER_SERVICE.md`](docs/GAME_CUSTOMER_SERVICE.md)
+Full guide: [`GAME_CUSTOMER_SERVICE.md`](GAME_CUSTOMER_SERVICE.md)
