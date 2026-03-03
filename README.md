@@ -1093,22 +1093,94 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
   <sub>nanobot is for educational, research, and technical exchange purposes only</sub>
 </p>
 
-## 🎮 Game Customer Service Extension
+## 🎮 Game Customer Service Extension — 大楚复古智能客服
 
-This repository includes an extension module `nanobot.game_cs` for game support while keeping the main nanobot framework unchanged.
+This repository includes an extension module `nanobot.game_cs` that implements a full SOP-driven customer service system for the game **《顽石英雄之大楚复古》**, while keeping the core nanobot framework untouched.
 
-Capabilities:
+### ✨ What's new in v2
 
-- account binding flow with screenshot + UID + server + confirmation
-- step-by-step user guidance for in-game support workflows
-- OpenViking-backed knowledge retrieval for support answers
+| Feature | Description |
+|---------|-------------|
+| **SOP State Machine** | 13-state flow: GREETING → COLLECTING_INFO → VALIDATING → BINDING → SENDING_CODE → follow-ups |
+| **Three-Factor Extraction** | Auto-parses `area_name` (几区) + `role_name` from free-form Chinese text; `game_name` defaults automatically |
+| **4-Code Dispatch** | Sends daily check-in code, lucky draw code, universal code, and guild code upon successful binding |
+| **Follow-up Scheduler** | 30-min lottery sign-up prompt + 1-hour fission/invite prompt via `/cron/process-followups` |
+| **Next-day Visit** | Proactive re-engagement via `/cron/next-day-visits` |
+| **Personality System** | 4 agent personalities: `lively` / `professional` / `steady` / `humorous` |
+| **KB Search** | Post-binding questions answered via OpenViking `find()` / `search()` with conversation context |
+| **Session Memory** | Conversation committed to OpenViking memory in the background for user profiling |
+| **Mock Mode** | `GAME_CS_MOCK_API=true` (default) — demo the full flow without a real game API |
 
-Quick start:
+### 🚀 Quick Start
 
 ```bash
 pip install -e ".[game_cs]"
+
 export GAME_CS_SERVICE_TOKEN="replace-with-strong-token"
-python -m nanobot.game_cs.service --host 0.0.0.0 --port 8011
+export GAME_CS_CODE_DAILY_CHECKIN="DC001"
+export GAME_CS_CODE_LUCKY_DRAW="TX002"
+export GAME_CS_CODE_UNIVERSAL="ws888"
+export GAME_CS_CODE_GUILD="FgYdqf6"
+
+nanobot-game-cs --host 0.0.0.0 --port 8011
 ```
+
+### 💬 Typical Conversation
+
+```
+[Bot]  Hello! 哥~ 来啦！是玩顽石英雄的老板吧😊
+       告诉小妹您在哪个大区、几区，角色名叫啥，小妹马上给您安排兑换码~
+
+[User] 裁决18区，角色叫战神无双
+
+[Bot]  哥~ 兑换码来啦！记得每天找小妹打卡哦😉
+
+       每日打卡：DC001
+       天选：TX002
+       通码：ws888
+       供宗号：FgYdqf6
+
+       有效期24小时，有啥问题随时喊我~🌹
+
+— 30 min later (via /cron/process-followups) —
+
+[Bot]  哥 跟您说个好事[愉快]连续找小妹签到3天，有一次抽奖机会，
+       最高免费抽充值赞助，小妹特地给您申请的，要帮您登记嘛~[玫瑰]
+
+— 1 hour later —
+
+[Bot]  哥，先给您登记上了[爱心]您喊朋友一起来玩，小妹给您安排抽路费转盘，
+       最高拿1000真冲[玫瑰]人多热闹才有意思，您身边有爱玩传奇的朋友嘛？
+```
+
+### ⚙️ Key Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GAME_CS_SERVICE_TOKEN` | `dev-token` | Auth token for all API calls |
+| `GAME_CS_PERSONALITY` | `lively` | Agent personality: lively / professional / steady / humorous |
+| `GAME_CS_MOCK_API` | `true` | Skip real game API calls (demo mode) |
+| `GAME_CS_CODE_DAILY_CHECKIN` | `DCXXX` | Daily check-in code (update each day) |
+| `GAME_CS_CODE_LUCKY_DRAW` | `TXYYY` | Lucky draw code (update each day) |
+| `GAME_CS_CODE_UNIVERSAL` | `ws888` | Universal code |
+| `GAME_CS_CODE_GUILD` | `FgYdqf6` | Guild code |
+| `GAME_CS_FOLLOWUP_30M_DELAY` | `1800` | Seconds until 30-min follow-up fires |
+| `GAME_CS_FOLLOWUP_1H_DELAY` | `3600` | Seconds until 1-hour fission follow-up fires |
+| `GAME_CS_OPENVIKING_PATH` | `.nanobot/openviking_data` | Embedded OpenViking data directory |
+
+### 📡 API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/healthz` | Health check |
+| `POST` | `/webhook/game-message` | Main SOP webhook (player messages) |
+| `POST` | `/cron/process-followups` | Trigger due 30-min / 1-hour follow-ups |
+| `POST` | `/cron/next-day-visits` | Trigger due next-day visits |
+| `POST` | `/admin/index-kb` | Index files into OpenViking knowledge base |
+| `POST` | `/admin/update-codes` | Hot-update daily redeem codes |
+| `POST` | `/admin/reset-session` | Reset a user's SOP session to GREETING |
+| `GET` | `/admin/session/{user_id}` | Inspect a user's current SOP state |
+
+Interactive docs available at `http://localhost:8011/docs` after startup.
 
 Full guide: [`GAME_CUSTOMER_SERVICE.md`](GAME_CUSTOMER_SERVICE.md)
