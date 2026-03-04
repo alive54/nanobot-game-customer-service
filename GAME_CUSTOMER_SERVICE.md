@@ -455,3 +455,14 @@ http://localhost:8011/redoc
 ```
 python -m nanobot.cli.commands gateway -p 18790
 ```
+
+修改后文档启动
+```
+# 方式一：单行启动（开启 AI）
+GAME_CS_AI_ENABLED=true python -m nanobot.game_cs.service --host 127.0.0.1 --port 8011
+
+# 方式二：先设置环境变量再启动
+set GAME_CS_AI_ENABLED=true
+python -m nanobot.game_cs.service --host 127.0.0.1 --port 8011
+
+```

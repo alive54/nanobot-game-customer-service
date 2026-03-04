@@ -411,6 +411,26 @@ def _codes_dict(cfg: GameCSConfig) -> dict[str, str]:
     }
 
 
+# ── AI async-to-sync bridge ───────────────────────────────────────────────────
+
+def _ai_run_sync(runtime, method_name: str, *args, **kwargs):
+    """
+    Call a *_sync method on a GameCSAIRuntime instance.
+    Returns None silently on any error so callers never need to guard against exceptions.
+    """
+    if runtime is None:
+        return None
+    try:
+        fn = getattr(runtime, method_name)
+        return fn(*args, **kwargs)
+    except Exception as exc:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning(
+            "AI call %s failed: %s", method_name, exc, exc_info=False
+        )
+        return None
+
+
 # ── SOP state-machine handler ─────────────────────────────────────────────────
 
 def _handle_message(
@@ -418,6 +438,8 @@ def _handle_message(
     store: GameCSStore,
     kb: OpenVikingKB,
     payload: GameMessageIn,
+    *,
+    ai_runtime=None,
 ) -> GameReply:
     """
     Core SOP state machine.  Reads the current session state, advances it
@@ -490,6 +512,34 @@ def _handle_message(
     if session.sop_state == SOPState.COLLECTING_INFO:
         # Parse new info from the current message (merge with already captured)
         area, role = _parse_user_info(user_text)
+
+        # ── AI-assisted info extraction (supplements regex) ────────────────
+        if cfg.ai_enabled and ai_runtime is not None and (not area or not role):
+            _session_key = f"game_cs:{user_id}"
+            _ai_result = _ai_run_sync(
+                ai_runtime,
+                "extract_info_sync",
+                _session_key,
+                user_text,
+                timeout_ms=cfg.ai_timeout_ms,
+            )
+            if _ai_result is not None:
+                _threshold = cfg.ai_info_extract_confidence_threshold
+                if _ai_result.get("confidence", 0.0) >= _threshold:
+                    area = area or _ai_result.get("area_name")
+                    role = role or _ai_result.get("role_name")
+                    import logging as _logging
+                    _logging.getLogger(__name__).info(
+                        "[AI] extracted area=%r role=%r conf=%.2f for user %s",
+                        area, role, _ai_result["confidence"], user_id,
+                    )
+                else:
+                    import logging as _logging
+                    _logging.getLogger(__name__).debug(
+                        "[AI] low confidence extract (%.2f) for user %s — keeping regex result",
+                        _ai_result.get("confidence", 0.0), user_id,
+                    )
+
         new_area = area or session.area_name
         new_role = role or session.role_name
 
@@ -637,7 +687,8 @@ def _handle_message(
                     follow_up_30m_sent=True,
                     default_game_name=cfg.default_game_name,
                 )
-            return _kb_reply(user_id, user_text, cfg, store, kb, session, personality)
+            return _kb_reply(user_id, user_text, cfg, store, kb, session, personality,
+                             ai_runtime=ai_runtime)
 
     # ─────────────────────────────────────────────────────────────────────────
     # STATE: SILENT / NEXT_DAY_VISIT / REACTIVATION / COMPLETED
@@ -650,13 +701,15 @@ def _handle_message(
         SOPState.COMPLETED,
     ):
         if user_text:
-            return _kb_reply(user_id, user_text, cfg, store, kb, session, personality)
+            return _kb_reply(user_id, user_text, cfg, store, kb, session, personality,
+                             ai_runtime=ai_runtime)
 
     # ─────────────────────────────────────────────────────────────────────────
     # FALLBACK: unhandled state — just do a KB search if we have text
     # ─────────────────────────────────────────────────────────────────────────
     if user_text:
-        return _kb_reply(user_id, user_text, cfg, store, kb, session, personality)
+        return _kb_reply(user_id, user_text, cfg, store, kb, session, personality,
+                         ai_runtime=ai_runtime)
 
     # Empty message, no state change
     fallback = "有什么需要帮忙的，随时找小妹~😊"
@@ -673,19 +726,74 @@ def _kb_reply(
     kb: OpenVikingKB,
     session: SOPSessionState,
     personality: str,
+    *,
+    ai_runtime=None,
 ) -> GameReply:
     """
     Answer a user question using OpenViking knowledge base search.
     Uses context-aware search() when message history is available,
     falls back to simple find() otherwise.
+
+    When cfg.ai_enabled is True and ai_runtime is available, tries AI first
+    and falls back to KB on timeout or failure.
     """
+    # ── AI-first reply path ────────────────────────────────────────────────
+    print(f"KB Search for user {cfg.ai_enabled} in state {ai_runtime}")
+    if cfg.ai_enabled and ai_runtime is not None:
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+        try:
+            history_for_ai = store.get_recent_messages(user_id, limit=cfg.ai_max_context_msgs)
+
+            # Run KB search first to supply grounding context to the AI
+            _kb_ctx: list[str] = []
+            if len(history_for_ai) >= 2:
+                _kb_ctx = kb.search_with_context(user_text, history=history_for_ai, limit=4)
+            else:
+                _kb_ctx = kb.search(user_text, limit=4)
+            _log.info("KB Serch for user %s in state %s returned %s results", user_id, session.sop_state, _kb_ctx)
+            _session_key = f"game_cs:{user_id}"
+            ai_reply = _ai_run_sync(
+                ai_runtime,
+                "ask_agent_sync",
+                _session_key,
+                user_text,
+                _kb_ctx,
+                history_for_ai,
+                timeout_ms=cfg.ai_timeout_ms,
+            )
+
+            if ai_reply:
+                _log.info("[AI] reply ok for user %s in state %s", user_id, session.sop_state)
+                store.append_message(user_id, "assistant", ai_reply)
+                return GameReply(
+                    status="ok",
+                    reply=ai_reply,
+                    sop_state=session.sop_state,
+                    next_step=None,
+                    bound=session.is_bound,
+                    timestamp=_now(),
+                )
+            else:
+                _log.info(
+                    "[AI] no reply / timeout for user %s — falling back to KB",
+                    user_id,
+                )
+        except Exception as _exc:  # noqa: BLE001
+            import logging as _logging2
+            _logging2.getLogger(__name__).warning(
+                "[AI] _kb_reply AI path raised: %s — falling back to KB", _exc,
+                exc_info=False,
+            )
+    # ── KB fallback (original logic below) ────────────────────────────────
+
     history = store.get_recent_messages(user_id, limit=8)
 
     if len(history) >= 2:
         kb_lines = kb.search_with_context(user_text, history=history, limit=4)
     else:
         kb_lines = kb.search(user_text, limit=4)
-
+    print(f"KB Search for user {user_id} in state {session.sop_state} returned {kb_lines}")
     if kb_lines:
         intro = {
             "lively": "找到啦哥！知识库里有这些参考：\n",
@@ -774,6 +882,25 @@ def create_app(config: GameCSConfig | None = None) -> FastAPI:
     cfg = config or GameCSConfig.from_env()
     store = GameCSStore(cfg.db_path)
     kb = OpenVikingKB(cfg.openviking_path, cfg.openviking_target_uri)
+
+    # ── AI runtime (optional) ─────────────────────────────────────────────
+    _ai_runtime = None
+    if cfg.ai_enabled:
+        try:
+            from .ai_runtime import build_runtime
+            _ai_runtime = build_runtime(workspace_path=r"C:\Users\Administrator\.nanobot\workspace1",timeout_ms=cfg.ai_timeout_ms)
+            if _ai_runtime is None:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "AI enabled in config but build_runtime() returned None "
+                    "(check nanobot config / API key). Running without AI."
+                )
+        except Exception as _exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Failed to initialise AI runtime: %s. Running without AI.", _exc,
+                exc_info=False,
+            )
 
     app = FastAPI(
         title="Nanobot 大楚复古智能客服",
@@ -890,7 +1017,7 @@ def create_app(config: GameCSConfig | None = None) -> FastAPI:
                 timestamp=_now(),
             )
 
-        reply = _handle_message(cfg, store, kb, payload)
+        reply = _handle_message(cfg, store, kb, payload, ai_runtime=_ai_runtime)
 
         # Background: commit conversation memory once the user is bound
         if reply.bound:

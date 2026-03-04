@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 import openviking as ov
 from openviking.message import TextPart
@@ -18,7 +18,7 @@ class OpenVikingKB:
     - close()                — graceful shutdown
     """
 
-    def __init__(self, data_path: Path, target_uri: str = "viking://resources/") -> None:
+    def __init__(self, data_path: Path, target_uri: str = "viking://resources/game-cs/") -> None:
         self._data_path = data_path
         self._target_uri = target_uri
         self._client: ov.OpenViking | None = None
@@ -70,6 +70,51 @@ class OpenVikingKB:
             return True
         except Exception:
             return False
+
+    @staticmethod
+    def _normalize_text(value: Any) -> str:
+        if not isinstance(value, str):
+            return ""
+        return value.strip().replace("\n", " ")
+
+    def _resource_snippet(self, item: Any, max_len: int = 240) -> str:
+        """
+        Prefer original chunk text; fall back to abstract/title/uri when needed.
+        """
+        candidates = (
+            getattr(item, "content", None),
+            getattr(item, "text", None),
+            getattr(item, "chunk_text", None),
+            getattr(item, "raw_text", None),
+            getattr(item, "abstract", None),
+            getattr(item, "title", None),
+            getattr(item, "uri", None),
+        )
+        for candidate in candidates:
+            normalized = self._normalize_text(candidate)
+            if normalized:
+                return normalized[:max_len]
+        return ""
+
+    def _format_resources(self, resources: Iterable[Any], limit: int) -> list[str]:
+        """
+        Render stable human-readable lines and deduplicate near-identical snippets.
+        """
+        lines: list[str] = []
+        seen: set[str] = set()
+        for item in resources:
+            snippet = self._resource_snippet(item)
+            if not snippet:
+                continue
+            key = snippet.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            score = getattr(item, "score", 0.0)
+            lines.append(f"[{score:.2f}] {snippet}")
+            if len(lines) >= limit:
+                break
+        return lines
 
     # ── Knowledge indexing ────────────────────────────────────────────────────
 
@@ -136,12 +181,7 @@ class OpenVikingKB:
         except Exception:
             return []
 
-        lines: list[str] = []
-        for item in result.resources:
-            abstract = (item.abstract or "").strip().replace("\n", " ")
-            if abstract:
-                lines.append(f"[{item.score:.2f}] {abstract[:240]}")
-        return lines
+        return self._format_resources(result.resources, limit=limit)
 
     # ── Context-aware search (search) ─────────────────────────────────────────
 
@@ -196,12 +236,7 @@ class OpenVikingKB:
             # Fall back to simple find() on any error
             return self.search(query, limit=limit)
 
-        lines: list[str] = []
-        for item in result.resources:
-            abstract = (item.abstract or "").strip().replace("\n", " ")
-            if abstract:
-                lines.append(f"[{item.score:.2f}] {abstract[:240]}")
-        return lines
+        return self._format_resources(result.resources, limit=limit)
 
     # ── Session memory commit ──────────────────────────────────────────────────
 
