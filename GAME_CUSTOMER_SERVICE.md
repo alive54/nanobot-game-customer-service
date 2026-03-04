@@ -449,3 +449,9 @@ ReDoc 文档：
 ```
 http://localhost:8011/redoc
 ```
+
+
+启动
+```
+python -m nanobot.cli.commands gateway -p 18790
+```

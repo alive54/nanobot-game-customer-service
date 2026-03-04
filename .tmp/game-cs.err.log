@@ -1,0 +1,7 @@
+D:\项目\智能客服\nanobot-game-customer-service\.venv\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.6.3) or chardet (7.0.0)/charset_normalizer (3.4.4) doesn't match a supported version!
+  warnings.warn(
+<frozen runpy>:128: RuntimeWarning: 'nanobot.game_cs.service' found in sys.modules after import of package 'nanobot.game_cs', but prior to execution of 'nanobot.game_cs.service'; this may result in unpredictable behaviour
+INFO:     Started server process [24196]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8011 (Press CTRL+C to quit)

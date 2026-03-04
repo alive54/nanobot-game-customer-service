@@ -876,6 +876,7 @@ def create_app(config: GameCSConfig | None = None) -> FastAPI:
         existing = store.get_or_create_session(
             payload.user_id, default_game_name=cfg.default_game_name
         )
+        print("existing session:" + str(existing))
         if existing.sop_state == SOPState.GREETING and not payload.message.strip():
             # Bot proactively sends greeting on first contact (empty message)
             greeting_text = _tmpl(SOPState.GREETING, cfg.personality)
