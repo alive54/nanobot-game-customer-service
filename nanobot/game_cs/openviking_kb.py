@@ -96,14 +96,97 @@ class OpenVikingKB:
                 return normalized[:max_len]
         return ""
 
-    def _format_resources(self, resources: Iterable[Any], limit: int) -> list[str]:
+    def _read_l2_text(self, uri: str, max_len: int = 600, raw: bool = False) -> str:
+        """
+        Read L2 raw content by URI and normalize to a single-line snippet.
+
+        Args:
+            uri: Viking URI to read from
+            max_len: Maximum length to return (when raw=False)
+            raw: If True, return original file content without truncation or formatting
+        """
+        if not uri:
+            return ""
+        try:
+            client = self._client_or_raise()
+            content = client.read(uri)
+        except Exception:
+            return ""
+
+        if raw:
+            return content
+
+        normalized = self._normalize_text(content)
+        if not normalized:
+            return ""
+        return normalized[:max_len]
+
+    def _resource_snippet_with_l2(
+        self,
+        item: Any,
+        include_l2: bool = False,
+        max_len: int = 240,
+        l2_max_len: int = 600,
+        raw_content: bool = False,
+    ) -> str:
+        """
+        Render snippet for a matched item.
+
+        When ``include_l2`` is enabled, leaf-node hits try to read L2 raw
+        content first; otherwise fallback to normal fields.
+
+        Args:
+            item: The matched item
+            include_l2: Whether to read L2 content for leaf nodes
+            max_len: Maximum length for snippet (when raw_content=False)
+            l2_max_len: Maximum length for L2 content (when raw_content=False)
+            raw_content: If True, return original file content without formatting
+        """
+        if include_l2:
+            try:
+                uri = getattr(item, "uri", None)
+                if isinstance(uri, str) and uri:
+                    l2 = self._read_l2_text(uri, max_len=l2_max_len, raw=raw_content)
+                    if l2:
+                        return l2[:max_len] if not raw_content else l2
+            except Exception:
+                pass
+        return self._resource_snippet(item, max_len=max_len)
+
+    def _format_resources(
+        self,
+        resources: Iterable[Any],
+        limit: int,
+        include_l2: bool = False,
+        max_len: int = 240,
+        l2_max_len: int = 600,
+        raw_content: bool = False,
+    ) -> list[str]:
         """
         Render stable human-readable lines and deduplicate near-identical snippets.
+
+        Args:
+            resources: Iterable of matched items
+            limit: Maximum number of results to return
+            include_l2: Whether to read L2 content for leaf nodes
+            max_len: Maximum length for snippet (when raw_content=False)
+            l2_max_len: Maximum length for L2 content (when raw_content=False)
+            raw_content: If True, return original file content without formatting
         """
         lines: list[str] = []
         seen: set[str] = set()
         for item in resources:
-            snippet = self._resource_snippet(item)
+            level = getattr(item, "level", 0)
+            if level != 2:
+                continue
+
+            snippet = self._resource_snippet_with_l2(
+                item,
+                include_l2=include_l2,
+                max_len=max_len,
+                l2_max_len=l2_max_len,
+                raw_content=raw_content,
+            )
             if not snippet:
                 continue
             key = snippet.lower()
@@ -159,12 +242,27 @@ class OpenVikingKB:
 
     # ── Simple semantic search (find) ─────────────────────────────────────────
 
-    def search(self, query: str, limit: int = 5) -> list[str]:
+    def search(
+        self,
+        query: str,
+        limit: int = 5,
+        *,
+        include_l2: bool = False,
+        l2_max_len: int = 600,
+        raw_content: bool = False,
+    ) -> list[str]:
         """
         Basic vector-similarity search with no session context.
 
         Returns a list of human-readable abstract strings ready to paste into
         a bot reply, prefixed with their relevance score.
+
+        Args:
+            query: Search query string
+            limit: Maximum number of results to return
+            include_l2: Whether to read L2 content for leaf nodes
+            l2_max_len: Maximum length for L2 content (when raw_content=False)
+            raw_content: If True, return original file content without formatting
 
         Fails silently: returns [] when OpenViking is unavailable.
         """
@@ -175,13 +273,20 @@ class OpenVikingKB:
             result = client.find(
                 query=query,
                 target_uri=self._target_uri,
-                limit=limit,
-                score_threshold=0.45,
+                limit=200,
+                score_threshold=0.4,
             )
-        except Exception:
+
+        except Exception as e:
             return []
 
-        return self._format_resources(result.resources, limit=limit)
+        return self._format_resources(
+            result.resources,
+            limit=limit,
+            include_l2=include_l2,
+            l2_max_len=l2_max_len,
+            raw_content=raw_content,
+        )
 
     # ── Context-aware search (search) ─────────────────────────────────────────
 
@@ -190,6 +295,10 @@ class OpenVikingKB:
         query: str,
         history: list[dict],  # [{"role": "user"|"assistant", "content": "..."}]
         limit: int = 5,
+        *,
+        include_l2: bool = False,
+        l2_max_len: int = 600,
+        raw_content: bool = False,
     ) -> list[str]:
         """
         Intent-aware search that incorporates recent conversation history.
@@ -206,37 +315,56 @@ class OpenVikingKB:
             session for context-aware retrieval.
         limit:
             Maximum number of results to return.
+        include_l2:
+            Whether to read L2 content for leaf nodes.
+        l2_max_len:
+            Maximum length for L2 content (when raw_content=False).
+        raw_content:
+            If True, return original file content without formatting.
 
         Returns
         -------
         list[str]
             Same format as :meth:`search` — scored abstract snippets.
         """
-        if not self._try_init():
-            return self.search(query, limit=limit)
-        client = self._client_or_raise()
+        # if not self._try_init():
+        #     return self.search(query, limit=limit, include_l2=include_l2, l2_max_len=l2_max_len, raw_content=raw_content)
+        # client = self._client_or_raise()
 
         # Build a transient OV session from the provided history
-        try:
-            session = client.session()
-            for turn in history[-8:]:          # cap at last 8 turns
-                role = turn.get("role", "user")
-                content = turn.get("content", "")
-                if content:
-                    session.add_message(role, [TextPart(text=content)])
+        # try:
+        #     session = client.session()
+        #     for turn in history[-8:]:          # cap at last 8 turns
+        #         role = turn.get("role", "user")
+        #         content = turn.get("content", "")
+        #         if content:
+        #             session.add_message(role, [TextPart(text=content)])
 
-            result = client.search(
-                query=query,
-                session=session,
-                target_uri=self._target_uri,
-                limit=limit,
-                score_threshold=0.40,
-            )
-        except Exception:
-            # Fall back to simple find() on any error
-            return self.search(query, limit=limit)
+        #     result = client.search(
+        #         query=query,
+        #         session=session,
+        #         target_uri=self._target_uri,
+        #         limit=200,
+        #         score_threshold=0.40,
+        #     )
 
-        return self._format_resources(result.resources, limit=limit)
+        #     for r in result.resources:
+        #         print(f"{r}")
+        #         print(f"  {r.uri} (score: {r.score:.4f})")
+
+        #     print("=================================================")
+
+        # except Exception as e:
+        #     # Fall back to simple find() on any error
+        return self.search(query, limit=limit, include_l2=include_l2, l2_max_len=l2_max_len, raw_content=raw_content)
+
+        # return self._format_resources(
+        #     result.resources,
+        #     limit=limit,
+        #     include_l2=include_l2,
+        #     l2_max_len=l2_max_len,
+        #     raw_content=raw_content,
+        # )
 
     # ── Session memory commit ──────────────────────────────────────────────────
 

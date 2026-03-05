@@ -47,6 +47,7 @@ class GameCSConfig:
     ai_timeout_ms: int  # max ms to wait for AI response before falling back
     ai_max_context_msgs: int  # max recent messages passed as context to AI
     ai_fallback_mode: str  # "strict" (KB only) | "best_effort" (AI then KB)
+    kb_handoff_score_threshold: float  # max score below this value => hand off to human
     ai_tool_whitelist: tuple  # tool names AI is allowed to call (empty = no tools)
     ai_info_extract_confidence_threshold: float  # min confidence to accept AI extraction
 
@@ -86,6 +87,9 @@ class GameCSConfig:
             ai_timeout_ms=int(os.getenv("GAME_CS_AI_TIMEOUT_MS", "50000")),
             ai_max_context_msgs=int(os.getenv("GAME_CS_AI_MAX_CONTEXT_MSGS", "8")),
             ai_fallback_mode=os.getenv("GAME_CS_AI_FALLBACK_MODE", "best_effort"),
+            kb_handoff_score_threshold=float(
+                os.getenv("GAME_CS_KB_HANDOFF_SCORE_THRESHOLD", "0.45")
+            ),
             ai_tool_whitelist=tuple(
                 s.strip()
                 for s in os.getenv("GAME_CS_AI_TOOL_WHITELIST", "").split(",")
