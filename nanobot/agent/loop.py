@@ -332,6 +332,7 @@ class AgentLoop:
         msg: InboundMessage,
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        extra_system_prompt: str | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -346,6 +347,7 @@ class AgentLoop:
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
+                extra_system_prompt=extra_system_prompt,
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
@@ -353,8 +355,7 @@ class AgentLoop:
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
 
-        preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-        logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
+        logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, msg.content)
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
@@ -422,6 +423,7 @@ class AgentLoop:
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            extra_system_prompt=extra_system_prompt,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -490,9 +492,15 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        extra_system_prompt: str | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+        response = await self._process_message(
+            msg,
+            session_key=session_key,
+            on_progress=on_progress,
+            extra_system_prompt=extra_system_prompt,
+        )
         return response.content if response else ""

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 GAME_CS_SYSTEM_PROMPT = (
+    "以下是你当前所要遵守的规则,如果与上述规则冲突，优先遵循下面的规则：\n"
     "你是《顽石英雄之大楚复古》客服助手。\n"
     "你需要结合提供的知识库片段回答游戏问题，保持简洁和准确。\n"
     "严禁触发代码下发、账号绑定、或任何外部 API 调用，这些由业务系统处理。\n"
@@ -52,28 +53,19 @@ class GameCSAIRuntime:
         timeout_ms: int | None = None,  # noqa: ARG002 - timeout handled by ask_agent_sync's future.result()
     ) -> str | None:
         try:
-            parts = [f"【系统要求】\n{GAME_CS_SYSTEM_PROMPT}"]
+            sys_parts = [GAME_CS_SYSTEM_PROMPT]
             if kb_context:
-                kb = "\n".join(f"\u2022 {s}" for s in kb_context if s)
+                kb = "\n".join(f"\u2022 {s}" for s in kb_context if s and s.strip())
                 if kb:
-                    parts.append(f"【知识库参考】\n{kb}")
-            if history:
-                recent: list[str] = []
-                for item in history[-6:]:
-                    content = str(item.get("content") or "").strip()
-                    if not content:
-                        continue
-                    role = "用户" if item.get("role") == "user" else "助手"
-                    recent.append(f"{role}: {content}")
-                if recent:
-                    parts.append("【近期对话】\n" + "\n".join(recent))
-            parts.append("【用户提问】\n" + user_text)
+                    sys_parts.append(f"【知识库参考】\n{kb}")
+            extra_sys = "\n\n".join(sys_parts)
             # Note: timeout is handled by future.result() in ask_agent_sync
             response = await self._agent.process_direct(
-                "\n\n".join(parts),
+                user_text,
                 session_key=session_key,
                 channel="game_cs",
                 chat_id=session_key,
+                extra_system_prompt=extra_sys,
             )
             return response.strip() if response else None
         except Exception:
@@ -97,43 +89,58 @@ class GameCSAIRuntime:
             )
             return future.result(timeout=(timeout_ms or self._timeout_ms) / 1000)
         except Exception:
-            logger.exception("ai_runtime.ask_agent_sync failed: session=%s", session_key, exc_info=True)
+            logger.exception(
+                "ai_runtime.ask_agent_sync failed: session=%s", session_key, exc_info=True
+            )
             return None
 
-    async def extract_info(self, session_key: str, user_text: str, timeout_ms: int | None = None) -> dict | None:
+    async def extract_info(
+        self, session_key: str, user_text: str, timeout_ms: int | None = None
+    ) -> dict | str | None:
         try:
-            prompt = (
-                f"【系统要求】\n{GAME_CS_SYSTEM_PROMPT}\n\n"
-                "请从以下玩家消息中提取游戏角色信息，仅输出 JSON，不要输出其他内容。\n"
-                'JSON 格式：{"area_name": "区服名或null", "role_name": "角色名或null", '
-                '"confidence": 0.0到1.0, "need_clarify": true或false}\n'
-                "玩家消息：" + user_text
+            extract_sys = (
+                GAME_CS_SYSTEM_PROMPT
+                + "\n\n"
+                + "当前任务目标是引导玩家给出游戏角色信息。方便绑定。\n"
+                + "请从玩家消息中提取游戏角色信息，仅输出 JSON，不要输出其他内容。\n"
+                + '{"area_name": "区服名或null", "role_name": "角色名或null", "confidence": 0.0到1.0, "need_clarify": true或false}'
             )
+            print(f"extract_info: extract_sys={extract_sys}, user_text={user_text}")
             response = await asyncio.wait_for(
                 self._agent.process_direct(
-                    prompt,
+                    user_text,
                     session_key=f"{session_key}:extract",
                     channel="game_cs",
                     chat_id=session_key,
+                    extra_system_prompt=extract_sys,
                 ),
                 timeout=(timeout_ms or self._timeout_ms) / 1000,
             )
+            print(response)
             if not response:
                 return None
             cleaned = response.strip()
             cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
             cleaned = re.sub(r"\s*```$", "", cleaned)
-            data = json.loads(cleaned.strip())
-            required = {"area_name", "role_name", "confidence", "need_clarify"}
-            return data if isinstance(data, dict) and required.issubset(data.keys()) else None
+            try:
+                data = json.loads(cleaned.strip())
+                required = {"area_name", "role_name", "confidence", "need_clarify"}
+                return data if isinstance(data, dict) and required.issubset(data.keys()) else None
+            except json.JSONDecodeError:
+                # 如果不是 JSON 格式，直接返回原文
+                return response
         except asyncio.TimeoutError:
             logger.warning("ai_runtime.extract_info timeout: session=%s", session_key)
             return None
         except Exception:
-            logger.exception("ai_runtime.extract_info failed: session=%s", session_key, exc_info=True)
+            logger.exception(
+                "ai_runtime.extract_info failed: session=%s", session_key, exc_info=True
+            )
             return None
 
-    def extract_info_sync(self, session_key: str, user_text: str, timeout_ms: int | None = None) -> dict | None:
+    def extract_info_sync(
+        self, session_key: str, user_text: str, timeout_ms: int | None = None
+    ) -> dict | str | None:
         try:
             future = asyncio.run_coroutine_threadsafe(
                 self.extract_info(session_key, user_text, timeout_ms=timeout_ms),
@@ -141,7 +148,9 @@ class GameCSAIRuntime:
             )
             return future.result(timeout=(timeout_ms or self._timeout_ms) / 1000)
         except Exception:
-            logger.exception("ai_runtime.extract_info_sync failed: session=%s", session_key, exc_info=True)
+            logger.exception(
+                "ai_runtime.extract_info_sync failed: session=%s", session_key, exc_info=True
+            )
             return None
 
     def close(self) -> None:
@@ -186,7 +195,11 @@ def build_runtime(workspace_path=None, timeout_ms: int = 5000) -> "GameCSAIRunti
             from nanobot.providers.registry import find_by_name
 
             spec = find_by_name(provider_name)
-            if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and spec.is_oauth):
+            if (
+                not model.startswith("bedrock/")
+                and not (p and p.api_key)
+                and not (spec and spec.is_oauth)
+            ):
                 logger.warning("ai_runtime: no API key configured for model %s", model)
                 return None
             provider = LiteLLMProvider(
@@ -198,6 +211,7 @@ def build_runtime(workspace_path=None, timeout_ms: int = 5000) -> "GameCSAIRunti
             )
 
         from pathlib import Path
+
         ws = Path(workspace_path) if workspace_path else config.workspace_path
         from nanobot.agent.loop import AgentLoop
         from nanobot.bus.queue import MessageBus
@@ -223,7 +237,17 @@ def build_runtime(workspace_path=None, timeout_ms: int = 5000) -> "GameCSAIRunti
             channels_config=None,
         )
         # 能力禁用
-        for name in ("exec", "write_file","read_file", "edit_file", "spawn", "web_search", "web_fetch", "message", "cron"):
+        for name in (
+            "exec",
+            "write_file",
+            "read_file",
+            "edit_file",
+            "spawn",
+            "web_search",
+            "web_fetch",
+            "message",
+            "cron",
+        ):
             try:
                 agent.tools._tools.pop(name, None)
             except Exception:

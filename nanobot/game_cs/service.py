@@ -513,7 +513,21 @@ def _handle_message(
                 user_text,
                 timeout_ms=cfg.ai_timeout_ms,
             )
+
+            
+            print(f"_ai_result={_ai_result}")
             if _ai_result is not None:
+                # 如果 _ai_result 不是字典（JSON），直接回复
+                if not isinstance(_ai_result, dict):
+                    store.append_message(user_id, "assistant", str(_ai_result))
+                    return GameReply(
+                        status="ok",
+                        reply=str(_ai_result),
+                        sop_state=session.sop_state,
+                        next_step=None,
+                        bound=False,
+                        timestamp=_now(),
+                    )
                 _threshold = cfg.ai_info_extract_confidence_threshold
                 if _ai_result.get("confidence", 0.0) >= _threshold:
                     area = area or _ai_result.get("area_name")

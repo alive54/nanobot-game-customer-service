@@ -81,7 +81,7 @@ class GameCSConfig:
             followup_30m_delay=int(os.getenv("GAME_CS_FOLLOWUP_30M_DELAY", "1800")),
             followup_1h_delay=int(os.getenv("GAME_CS_FOLLOWUP_1H_DELAY", "3600")),
             # Retry limits
-            max_collect_retries=int(os.getenv("GAME_CS_MAX_COLLECT_RETRIES", "3")),
+            max_collect_retries=int(os.getenv("GAME_CS_MAX_COLLECT_RETRIES", "100")),
             # AI augmentation
             ai_enabled=os.getenv("GAME_CS_AI_ENABLED", "false").lower() in ("1", "true", "yes"),
             ai_timeout_ms=int(os.getenv("GAME_CS_AI_TIMEOUT_MS", "50000")),

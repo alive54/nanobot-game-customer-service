@@ -1,4 +1,5 @@
 .assets
+.nanobot
 .env
 *.pyc
 dist/
@@ -20,3 +21,4 @@ poetry.lock
 .pytest_cache/
 botpy.log
 tests/
+nul

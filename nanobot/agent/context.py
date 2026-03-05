@@ -23,7 +23,11 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        extra_system_prompt: str | None = None,
+    ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
 
@@ -49,6 +53,9 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 {skills_summary}""")
+
+        if extra_system_prompt:
+            parts.append(extra_system_prompt)
 
         return "\n\n---\n\n".join(parts)
 
@@ -130,10 +137,11 @@ Reminder: commit your changes in this workspace after edits.
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        extra_system_prompt: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, extra_system_prompt=extra_system_prompt)},
             *history,
             {"role": "user", "content": self._build_runtime_context(channel, chat_id)},
             {"role": "user", "content": self._build_user_content(current_message, media)},
