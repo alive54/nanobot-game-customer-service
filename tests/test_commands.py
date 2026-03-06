@@ -1,11 +1,14 @@
+import asyncio
 import shutil
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
-from nanobot.cli.commands import app
+from nanobot.bus.queue import MessageBus
+from nanobot.cli.commands import _build_gateway_http_app, _pick_routable_target, app
 from nanobot.config.schema import Config
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
@@ -17,11 +20,12 @@ runner = CliRunner()
 @pytest.fixture
 def mock_paths():
     """Mock config/workspace paths for test isolation."""
-    with patch("nanobot.config.loader.get_config_path") as mock_cp, \
-         patch("nanobot.config.loader.save_config") as mock_sc, \
-         patch("nanobot.config.loader.load_config") as mock_lc, \
-         patch("nanobot.utils.helpers.get_workspace_path") as mock_ws:
-
+    with (
+        patch("nanobot.config.loader.get_config_path") as mock_cp,
+        patch("nanobot.config.loader.save_config") as mock_sc,
+        patch("nanobot.config.loader.load_config") as mock_lc,
+        patch("nanobot.utils.helpers.get_workspace_path") as mock_ws,
+    ):
         base_dir = Path("./test_onboard_data")
         if base_dir.exists():
             shutil.rmtree(base_dir)
@@ -128,3 +132,84 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+class _DummySessionManager:
+    def __init__(self, sessions):
+        self._sessions = sessions
+
+    def list_sessions(self):
+        return list(self._sessions)
+
+
+def test_pick_routable_target_prefers_latest_external_enabled_session():
+    session_manager = _DummySessionManager(
+        [
+            {"key": "cli:direct"},
+            {"key": "telegram:chat-b"},
+            {"key": "dingtalk:chat-a"},
+        ]
+    )
+
+    target = _pick_routable_target(
+        session_manager,
+        ["dingtalk", "telegram"],
+        allow_cli_fallback=False,
+    )
+
+    assert target == ("telegram", "chat-b")
+
+
+def test_gateway_http_message_uses_latest_session_when_target_missing():
+    bus = MessageBus()
+    app = _build_gateway_http_app(
+        bus,
+        _DummySessionManager([{"key": "dingtalk:admin-room"}]),
+        ["dingtalk"],
+    )
+    client = TestClient(app)
+
+    response = client.post("/message", json={"text": "manual handoff"})
+
+    assert response.status_code == 200
+    assert response.json()["channel"] == "dingtalk"
+    assert response.json()["chat_id"] == "admin-room"
+
+    outbound = asyncio.run(bus.consume_outbound())
+    assert outbound.channel == "dingtalk"
+    assert outbound.chat_id == "admin-room"
+    assert outbound.content == "manual handoff"
+
+
+def test_gateway_http_message_accepts_explicit_target():
+    bus = MessageBus()
+    app = _build_gateway_http_app(
+        bus,
+        _DummySessionManager([]),
+        ["telegram"],
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/message",
+        json={"text": "manual handoff", "channel": "telegram", "chat_id": "admin42"},
+    )
+
+    assert response.status_code == 200
+    outbound = asyncio.run(bus.consume_outbound())
+    assert outbound.channel == "telegram"
+    assert outbound.chat_id == "admin42"
+
+
+def test_gateway_http_message_returns_409_without_routable_target():
+    bus = MessageBus()
+    app = _build_gateway_http_app(
+        bus,
+        _DummySessionManager([]),
+        ["telegram"],
+    )
+    client = TestClient(app)
+
+    response = client.post("/message", json={"text": "manual handoff"})
+
+    assert response.status_code == 409

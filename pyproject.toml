@@ -64,6 +64,7 @@ game_cs = [
 [project.scripts]
 nanobot = "nanobot.cli.commands:app"
 nanobot-game-cs = "nanobot.game_cs.service:main"
+game-cs-bridge = "nanobot.game_cs.bridge_runner:main"
 
 [build-system]
 requires = ["hatchling"]
