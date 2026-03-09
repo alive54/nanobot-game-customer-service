@@ -81,19 +81,6 @@ class MatrixConfig(Base):
     allow_room_mentions: bool = False
 
 
-class MowebchatConfig(Base):
-    """Mowebchat channel configuration for local GameCS bridge testing."""
-
-    enabled: bool = False
-    base_url: str = "http://127.0.0.1:8099"
-    pull_path: str = "/api/pull-inbound"
-    receive_path: str = "/api/receive"
-    pull_wait_ms: int = 15000
-    retry_delay_ms: int = 800
-    timeout_s: float = 20.0
-    allow_from: list[str] = Field(default_factory=lambda: ["*"])
-
-
 class EmailConfig(Base):
     """Email channel configuration (IMAP inbound + SMTP outbound)."""
 
@@ -196,7 +183,22 @@ class QQConfig(Base):
     enabled: bool = False
     app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
-    allow_from: list[str] = Field(default_factory=list)  # Allowed user openids; empty means deny all
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
+
+class MatrixConfig(Base):
+    """Matrix (Element) channel configuration."""
+    enabled: bool = False
+    homeserver: str = "https://matrix.org"
+    access_token: str = ""
+    user_id: str = ""                       # e.g. @bot:matrix.org
+    device_id: str = ""
+    e2ee_enabled: bool = True               # end-to-end encryption support
+    sync_stop_grace_seconds: int = 2        # graceful sync_forever shutdown timeout
+    max_media_bytes: int = 20 * 1024 * 1024 # inbound + outbound attachment limit
+    allow_from: list[str] = Field(default_factory=list)
+    group_policy: Literal["open", "mention", "allowlist"] = "open"
+    group_allow_from: list[str] = Field(default_factory=list)
+    allow_room_mentions: bool = False
 
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
@@ -208,7 +210,6 @@ class ChannelsConfig(Base):
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
     mochat: MochatConfig = Field(default_factory=MochatConfig)
-    mowebchat: MowebchatConfig = Field(default_factory=MowebchatConfig)
     dingtalk: DingTalkConfig = Field(default_factory=DingTalkConfig)
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
