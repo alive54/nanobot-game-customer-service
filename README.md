@@ -1,1186 +1,528 @@
-<div align="center">
-  <img src="nanobot_logo.png" alt="nanobot" width="500">
-  <h1>nanobot: Ultra-Lightweight Personal AI Assistant</h1>
-  <p>
-    <a href="https://pypi.org/project/nanobot-ai/"><img src="https://img.shields.io/pypi/v/nanobot-ai" alt="PyPI"></a>
-    <a href="https://pepy.tech/project/nanobot-ai"><img src="https://static.pepy.tech/badge/nanobot-ai" alt="Downloads"></a>
-    <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="Python">
-    <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-    <a href="./COMMUNICATION.md"><img src="https://img.shields.io/badge/Feishu-Group-E9DBFC?style=flat&logo=feishu&logoColor=white" alt="Feishu"></a>
-    <a href="./COMMUNICATION.md"><img src="https://img.shields.io/badge/WeChat-Group-C5EAB4?style=flat&logo=wechat&logoColor=white" alt="WeChat"></a>
-    <a href="https://discord.gg/MnCvHqpUGB"><img src="https://img.shields.io/badge/Discord-Community-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
-  </p>
-</div>
+# Nanobot Game Customer Service
 
-🐈 **nanobot** is an **ultra-lightweight** personal AI assistant inspired by [OpenClaw](https://github.com/openclaw/openclaw) 
+基于 `nanobot` 和 `nanobot.game_cs` 的游戏客服系统，支持：
 
-⚡️ Delivers core agent functionality in just **~4,000** lines of code — **99% smaller** than Clawdbot's 430k+ lines.
+- SOP 驱动的客户接待流程
+- 知识库检索与 AI 辅助回复
+- 人工转接
+- 管理端通过 `gateway` + 钉钉 / 飞书机器人进行客服管理
+- 对运行中的 `game_cs` 进程进行统计、查询、主动发消息、重置会话、处理人工工单
 
-📏 Real-time line count: **3,935 lines** (run `bash core_agent_lines.sh` to verify anytime)
+本文档按“从零启动到可管理”来写，直接照着配置即可。
 
-## 📢 News
+## 1. 项目结构
 
-- **2026-02-28** 🚀 Released **v0.1.4.post3** — cleaner context, hardened session history, and smarter agent. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post3) for details.
-- **2026-02-27** 🧠 Experimental thinking mode support, DingTalk media messages, Feishu and QQ channel fixes.
-- **2026-02-26** 🛡️ Session poisoning fix, WhatsApp dedup, Windows path guard, Mistral compatibility.
-- **2026-02-25** 🧹 New Matrix channel, cleaner session context, auto workspace template sync.
-- **2026-02-24** 🚀 Released **v0.1.4.post2** — a reliability-focused release with a redesigned heartbeat, prompt cache optimization, and hardened provider & channel stability. See [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post2) for details.
-- **2026-02-23** 🔧 Virtual tool-call heartbeat, prompt cache optimization, Slack mrkdwn fixes.
-- **2026-02-22** 🛡️ Slack thread isolation, Discord typing fix, agent reliability improvements.
-- **2026-02-21** 🎉 Released **v0.1.4.post1** — new providers, media support across channels, and major stability improvements. See [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post1) for details.
-- **2026-02-20** 🐦 Feishu now receives multimodal files from users. More reliable memory under the hood.
-- **2026-02-19** ✨ Slack now sends files, Discord splits long messages, and subagents work in CLI mode.
+- `nanobot.game_cs.service`
+  运行游戏客服服务，默认对外提供 webhook、admin、cron 接口
+- `nanobot.cli.commands gateway`
+  运行管理端 gateway，承接钉钉、飞书等机器人消息
+- `nanobot.agent.tools.game_cs_admin`
+  管理端 agent 调用的工具，用于访问 `game_cs` 的 admin API
 
-<details>
-<summary>Earlier news</summary>
+推荐部署形态：
 
-- **2026-02-18** ⚡️ nanobot now supports VolcEngine, MCP custom auth headers, and Anthropic prompt caching.
-- **2026-02-17** 🎉 Released **v0.1.4** — MCP support, progress streaming, new providers, and multiple channel improvements. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4) for details.
-- **2026-02-16** 🦞 nanobot now integrates a [ClawHub](https://clawhub.ai) skill — search and install public agent skills.
-- **2026-02-15** 🔑 nanobot now supports OpenAI Codex provider with OAuth login support.
-- **2026-02-14** 🔌 nanobot now supports MCP! See [MCP section](#mcp-model-context-protocol) for details.
-- **2026-02-13** 🎉 Released **v0.1.3.post7** — includes security hardening and multiple improvements. **Please upgrade to the latest version to address security issues**. See [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post7) for more details.
-- **2026-02-12** 🧠 Redesigned memory system — Less code, more reliable. Join the [discussion](https://github.com/HKUDS/nanobot/discussions/566) about it!
-- **2026-02-11** ✨ Enhanced CLI experience and added MiniMax support!
-- **2026-02-10** 🎉 Released **v0.1.3.post6** with improvements! Check the updates [notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post6) and our [roadmap](https://github.com/HKUDS/nanobot/discussions/431).
-- **2026-02-09** 💬 Added Slack, Email, and QQ support — nanobot now supports multiple chat platforms!
-- **2026-02-08** 🔧 Refactored Providers—adding a new LLM provider now takes just 2 simple steps! Check [here](#providers).
-- **2026-02-07** 🚀 Released **v0.1.3.post5** with Qwen support & several key improvements! Check [here](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post5) for details.
-- **2026-02-06** ✨ Added Moonshot/Kimi provider, Discord integration, and enhanced security hardening!
-- **2026-02-05** ✨ Added Feishu channel, DeepSeek provider, and enhanced scheduled tasks support!
-- **2026-02-04** 🚀 Released **v0.1.3.post4** with multi-provider & Docker support! Check [here](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post4) for details.
-- **2026-02-03** ⚡ Integrated vLLM for local LLM support and improved natural language task scheduling!
-- **2026-02-02** 🎉 nanobot officially launched! Welcome to try 🐈 nanobot!
+1. `game_cs` 进程负责接待玩家
+2. `gateway` 进程负责接待管理员
+3. 管理员在钉钉 / 飞书里给机器人发自然语言指令
+4. `gateway` 调用 `game_cs` admin API 完成管理动作
 
-</details>
+## 2. 安装
 
-## Key Features of nanobot:
+### 2.1 Python
 
-🪶 **Ultra-Lightweight**: Just ~4,000 lines of core agent code — 99% smaller than Clawdbot.
+要求：
 
-🔬 **Research-Ready**: Clean, readable code that's easy to understand, modify, and extend for research.
+- Python `3.11+`
 
-⚡️ **Lightning Fast**: Minimal footprint means faster startup, lower resource usage, and quicker iterations.
-
-💎 **Easy-to-Use**: One-click to deploy and you're ready to go.
-
-## 🏗️ Architecture
-
-<p align="center">
-  <img src="nanobot_arch.png" alt="nanobot architecture" width="800">
-</p>
-
-## ✨ Features
-
-<table align="center">
-  <tr align="center">
-    <th><p align="center">📈 24/7 Real-Time Market Analysis</p></th>
-    <th><p align="center">🚀 Full-Stack Software Engineer</p></th>
-    <th><p align="center">📅 Smart Daily Routine Manager</p></th>
-    <th><p align="center">📚 Personal Knowledge Assistant</p></th>
-  </tr>
-  <tr>
-    <td align="center"><p align="center"><img src="case/search.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="case/code.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="case/scedule.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="case/memory.gif" width="180" height="400"></p></td>
-  </tr>
-  <tr>
-    <td align="center">Discovery • Insights • Trends</td>
-    <td align="center">Develop • Deploy • Scale</td>
-    <td align="center">Schedule • Automate • Organize</td>
-    <td align="center">Learn • Memory • Reasoning</td>
-  </tr>
-</table>
-
-## 📦 Install
-
-**Install from source** (latest features, recommended for development)
-
-```bash
-git clone https://github.com/HKUDS/nanobot.git
-cd nanobot
-pip install -e .
-```
-
-**Install with [uv](https://github.com/astral-sh/uv)** (stable, fast)
-
-```bash
-uv tool install nanobot-ai
-```
-
-**Install from PyPI** (stable)
-
-```bash
-pip install nanobot-ai
-```
-
-## 🚀 Quick Start
-
-> [!TIP]
-> Set your API key in `~/.nanobot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
-
-**1. Initialize**
-
-```bash
-nanobot onboard
-```
-
-**2. Configure** (`~/.nanobot/config.json`)
-
-Add or merge these **two parts** into your config (other options have defaults).
-
-*Set your API key* (e.g. OpenRouter, recommended for global users):
-```json
-{
-  "providers": {
-    "openrouter": {
-      "apiKey": "sk-or-v1-xxx"
-    }
-  }
-}
-```
-
-*Set your model* (optionally pin a provider — defaults to auto-detection):
-```json
-{
-  "agents": {
-    "defaults": {
-      "model": "anthropic/claude-opus-4-5",
-      "provider": "openrouter"
-    }
-  }
-}
-```
-
-**3. Chat**
-
-```bash
-nanobot agent
-```
-
-That's it! You have a working AI assistant in 2 minutes.
-
-## 💬 Chat Apps
-
-Connect nanobot to your favorite chat platform.
-
-| Channel | What you need |
-|---------|---------------|
-| **Telegram** | Bot token from @BotFather |
-| **Discord** | Bot token + Message Content intent |
-| **WhatsApp** | QR code scan |
-| **Feishu** | App ID + App Secret |
-| **Mochat** | Claw token (auto-setup available) |
-| **DingTalk** | App Key + App Secret |
-| **Slack** | Bot token + App-Level token |
-| **Email** | IMAP/SMTP credentials |
-| **QQ** | App ID + App Secret |
-
-<details>
-<summary><b>Telegram</b> (Recommended)</summary>
-
-**1. Create a bot**
-- Open Telegram, search `@BotFather`
-- Send `/newbot`, follow prompts
-- Copy the token
-
-**2. Configure**
-
-```json
-{
-  "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
-    }
-  }
-}
-```
-
-> You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`.
-> Copy this value **without the `@` symbol** and paste it into the config file.
-
-
-**3. Run**
-
-```bash
-nanobot gateway
-```
-
-</details>
-
-<details>
-<summary><b>Mochat (Claw IM)</b></summary>
-
-Uses **Socket.IO WebSocket** by default, with HTTP polling fallback.
-
-**1. Ask nanobot to set up Mochat for you**
-
-Simply send this message to nanobot (replace `xxx@xxx` with your real email):
-
-```
-Read https://raw.githubusercontent.com/HKUDS/MoChat/refs/heads/main/skills/nanobot/skill.md and register on MoChat. My Email account is xxx@xxx Bind me as your owner and DM me on MoChat.
-```
-
-nanobot will automatically register, configure `~/.nanobot/config.json`, and connect to Mochat.
-
-**2. Restart gateway**
-
-```bash
-nanobot gateway
-```
-
-That's it — nanobot handles the rest!
-
-<br>
-
-<details>
-<summary>Manual configuration (advanced)</summary>
-
-If you prefer to configure manually, add the following to `~/.nanobot/config.json`:
-
-> Keep `claw_token` private. It should only be sent in `X-Claw-Token` header to your Mochat API endpoint.
-
-```json
-{
-  "channels": {
-    "mochat": {
-      "enabled": true,
-      "base_url": "https://mochat.io",
-      "socket_url": "https://mochat.io",
-      "socket_path": "/socket.io",
-      "claw_token": "claw_xxx",
-      "agent_user_id": "6982abcdef",
-      "sessions": ["*"],
-      "panels": ["*"],
-      "reply_delay_mode": "non-mention",
-      "reply_delay_ms": 120000
-    }
-  }
-}
-```
-
-
-
-</details>
-
-</details>
-
-<details>
-<summary><b>Discord</b></summary>
-
-**1. Create a bot**
-- Go to https://discord.com/developers/applications
-- Create an application → Bot → Add Bot
-- Copy the bot token
-
-**2. Enable intents**
-- In the Bot settings, enable **MESSAGE CONTENT INTENT**
-- (Optional) Enable **SERVER MEMBERS INTENT** if you plan to use allow lists based on member data
-
-**3. Get your User ID**
-- Discord Settings → Advanced → enable **Developer Mode**
-- Right-click your avatar → **Copy User ID**
-
-**4. Configure**
-
-```json
-{
-  "channels": {
-    "discord": {
-      "enabled": true,
-      "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
-    }
-  }
-}
-```
-
-**5. Invite the bot**
-- OAuth2 → URL Generator
-- Scopes: `bot`
-- Bot Permissions: `Send Messages`, `Read Message History`
-- Open the generated invite URL and add the bot to your server
-
-**6. Run**
-
-```bash
-nanobot gateway
-```
-
-</details>
-
-<details>
-<summary><b>Matrix (Element)</b></summary>
-
-Install Matrix dependencies first:
-
-```bash
-pip install nanobot-ai[matrix]
-```
-
-**1. Create/choose a Matrix account**
-
-- Create or reuse a Matrix account on your homeserver (for example `matrix.org`).
-- Confirm you can log in with Element.
-
-**2. Get credentials**
-
-- You need:
-  - `userId` (example: `@nanobot:matrix.org`)
-  - `accessToken`
-  - `deviceId` (recommended so sync tokens can be restored across restarts)
-- You can obtain these from your homeserver login API (`/_matrix/client/v3/login`) or from your client's advanced session settings.
-
-**3. Configure**
-
-```json
-{
-  "channels": {
-    "matrix": {
-      "enabled": true,
-      "homeserver": "https://matrix.org",
-      "userId": "@nanobot:matrix.org",
-      "accessToken": "syt_xxx",
-      "deviceId": "NANOBOT01",
-      "e2eeEnabled": true,
-      "allowFrom": ["@your_user:matrix.org"],
-      "groupPolicy": "open",
-      "groupAllowFrom": [],
-      "allowRoomMentions": false,
-      "maxMediaBytes": 20971520
-    }
-  }
-}
-```
-
-> Keep a persistent `matrix-store` and stable `deviceId` — encrypted session state is lost if these change across restarts.
-
-| Option | Description |
-|--------|-------------|
-| `allowFrom` | User IDs allowed to interact. Empty = all senders. |
-| `groupPolicy` | `open` (default), `mention`, or `allowlist`. |
-| `groupAllowFrom` | Room allowlist (used when policy is `allowlist`). |
-| `allowRoomMentions` | Accept `@room` mentions in mention mode. |
-| `e2eeEnabled` | E2EE support (default `true`). Set `false` for plaintext-only. |
-| `maxMediaBytes` | Max attachment size (default `20MB`). Set `0` to block all media. |
-
-
-
-
-**4. Run**
-
-```bash
-nanobot gateway
-```
-
-</details>
-
-<details>
-<summary><b>WhatsApp</b></summary>
-
-Requires **Node.js ≥18**.
-
-**1. Link device**
-
-```bash
-nanobot channels login
-# Scan QR with WhatsApp → Settings → Linked Devices
-```
-
-**2. Configure**
-
-```json
-{
-  "channels": {
-    "whatsapp": {
-      "enabled": true,
-      "allowFrom": ["+1234567890"]
-    }
-  }
-}
-```
-
-**3. Run** (two terminals)
-
-```bash
-# Terminal 1
-nanobot channels login
-
-# Terminal 2
-nanobot gateway
-```
-
-</details>
-
-<details>
-<summary><b>Feishu (飞书)</b></summary>
-
-Uses **WebSocket** long connection — no public IP required.
-
-**1. Create a Feishu bot**
-- Visit [Feishu Open Platform](https://open.feishu.cn/app)
-- Create a new app → Enable **Bot** capability
-- **Permissions**: Add `im:message` (send messages) and `im:message.p2p_msg:readonly` (receive messages)
-- **Events**: Add `im.message.receive_v1` (receive messages)
-  - Select **Long Connection** mode (requires running nanobot first to establish connection)
-- Get **App ID** and **App Secret** from "Credentials & Basic Info"
-- Publish the app
-
-**2. Configure**
-
-```json
-{
-  "channels": {
-    "feishu": {
-      "enabled": true,
-      "appId": "cli_xxx",
-      "appSecret": "xxx",
-      "encryptKey": "",
-      "verificationToken": "",
-      "allowFrom": ["ou_YOUR_OPEN_ID"]
-    }
-  }
-}
-```
-
-> `encryptKey` and `verificationToken` are optional for Long Connection mode.
-> `allowFrom`: Add your open_id (find it in nanobot logs when you message the bot). Use `["*"]` to allow all users.
-
-**3. Run**
-
-```bash
-nanobot gateway
-```
-
-> [!TIP]
-> Feishu uses WebSocket to receive messages — no webhook or public IP needed!
-
-</details>
-
-<details>
-<summary><b>QQ (QQ单聊)</b></summary>
-
-Uses **botpy SDK** with WebSocket — no public IP required. Currently supports **private messages only**.
-
-**1. Register & create bot**
-- Visit [QQ Open Platform](https://q.qq.com) → Register as a developer (personal or enterprise)
-- Create a new bot application
-- Go to **开发设置 (Developer Settings)** → copy **AppID** and **AppSecret**
-
-**2. Set up sandbox for testing**
-- In the bot management console, find **沙箱配置 (Sandbox Config)**
-- Under **在消息列表配置**, click **添加成员** and add your own QQ number
-- Once added, scan the bot's QR code with mobile QQ → open the bot profile → tap "发消息" to start chatting
-
-**3. Configure**
-
-> - `allowFrom`: Add your openid (find it in nanobot logs when you message the bot). Use `["*"]` for public access.
-> - For production: submit a review in the bot console and publish. See [QQ Bot Docs](https://bot.q.qq.com/wiki/) for the full publishing flow.
-
-```json
-{
-  "channels": {
-    "qq": {
-      "enabled": true,
-      "appId": "YOUR_APP_ID",
-      "secret": "YOUR_APP_SECRET",
-      "allowFrom": ["YOUR_OPENID"]
-    }
-  }
-}
-```
-
-**4. Run**
-
-```bash
-nanobot gateway
-```
-
-Now send a message to the bot from QQ — it should respond!
-
-</details>
-
-<details>
-<summary><b>DingTalk (钉钉)</b></summary>
-
-Uses **Stream Mode** — no public IP required.
-
-**1. Create a DingTalk bot**
-- Visit [DingTalk Open Platform](https://open-dev.dingtalk.com/)
-- Create a new app -> Add **Robot** capability
-- **Configuration**:
-  - Toggle **Stream Mode** ON
-- **Permissions**: Add necessary permissions for sending messages
-- Get **AppKey** (Client ID) and **AppSecret** (Client Secret) from "Credentials"
-- Publish the app
-
-**2. Configure**
-
-```json
-{
-  "channels": {
-    "dingtalk": {
-      "enabled": true,
-      "clientId": "YOUR_APP_KEY",
-      "clientSecret": "YOUR_APP_SECRET",
-      "allowFrom": ["YOUR_STAFF_ID"]
-    }
-  }
-}
-```
-
-> `allowFrom`: Add your staff ID. Use `["*"]` to allow all users.
-
-**3. Run**
-
-```bash
-nanobot gateway
-```
-
-</details>
-
-<details>
-<summary><b>Slack</b></summary>
-
-Uses **Socket Mode** — no public URL required.
-
-**1. Create a Slack app**
-- Go to [Slack API](https://api.slack.com/apps) → **Create New App** → "From scratch"
-- Pick a name and select your workspace
-
-**2. Configure the app**
-- **Socket Mode**: Toggle ON → Generate an **App-Level Token** with `connections:write` scope → copy it (`xapp-...`)
-- **OAuth & Permissions**: Add bot scopes: `chat:write`, `reactions:write`, `app_mentions:read`
-- **Event Subscriptions**: Toggle ON → Subscribe to bot events: `message.im`, `message.channels`, `app_mention` → Save Changes
-- **App Home**: Scroll to **Show Tabs** → Enable **Messages Tab** → Check **"Allow users to send Slash commands and messages from the messages tab"**
-- **Install App**: Click **Install to Workspace** → Authorize → copy the **Bot Token** (`xoxb-...`)
-
-**3. Configure nanobot**
-
-```json
-{
-  "channels": {
-    "slack": {
-      "enabled": true,
-      "botToken": "xoxb-...",
-      "appToken": "xapp-...",
-      "allowFrom": ["YOUR_SLACK_USER_ID"],
-      "groupPolicy": "mention"
-    }
-  }
-}
-```
-
-**4. Run**
-
-```bash
-nanobot gateway
-```
-
-DM the bot directly or @mention it in a channel — it should respond!
-
-> [!TIP]
-> - `groupPolicy`: `"mention"` (default — respond only when @mentioned), `"open"` (respond to all channel messages), or `"allowlist"` (restrict to specific channels).
-> - DM policy defaults to open. Set `"dm": {"enabled": false}` to disable DMs.
-
-</details>
-
-<details>
-<summary><b>Email</b></summary>
-
-Give nanobot its own email account. It polls **IMAP** for incoming mail and replies via **SMTP** — like a personal email assistant.
-
-**1. Get credentials (Gmail example)**
-- Create a dedicated Gmail account for your bot (e.g. `my-nanobot@gmail.com`)
-- Enable 2-Step Verification → Create an [App Password](https://myaccount.google.com/apppasswords)
-- Use this app password for both IMAP and SMTP
-
-**2. Configure**
-
-> - `consentGranted` must be `true` to allow mailbox access. This is a safety gate — set `false` to fully disable.
-> - `allowFrom`: Add your email address. Use `["*"]` to accept emails from anyone.
-> - `smtpUseTls` and `smtpUseSsl` default to `true` / `false` respectively, which is correct for Gmail (port 587 + STARTTLS). No need to set them explicitly.
-> - Set `"autoReplyEnabled": false` if you only want to read/analyze emails without sending automatic replies.
-
-```json
-{
-  "channels": {
-    "email": {
-      "enabled": true,
-      "consentGranted": true,
-      "imapHost": "imap.gmail.com",
-      "imapPort": 993,
-      "imapUsername": "my-nanobot@gmail.com",
-      "imapPassword": "your-app-password",
-      "smtpHost": "smtp.gmail.com",
-      "smtpPort": 587,
-      "smtpUsername": "my-nanobot@gmail.com",
-      "smtpPassword": "your-app-password",
-      "fromAddress": "my-nanobot@gmail.com",
-      "allowFrom": ["your-real-email@gmail.com"]
-    }
-  }
-}
-```
-
-
-**3. Run**
-
-```bash
-nanobot gateway
-```
-
-</details>
-
-## 🌐 Agent Social Network
-
-🐈 nanobot is capable of linking to the agent social network (agent community). **Just send one message and your nanobot joins automatically!**
-
-| Platform | How to Join (send this message to your bot) |
-|----------|-------------|
-| [**Moltbook**](https://www.moltbook.com/) | `Read https://moltbook.com/skill.md and follow the instructions to join Moltbook` |
-| [**ClawdChat**](https://clawdchat.ai/) | `Read https://clawdchat.ai/skill.md and follow the instructions to join ClawdChat` |
-
-Simply send the command above to your nanobot (via CLI or any chat channel), and it will handle the rest.
-
-## ⚙️ Configuration
-
-Config file: `~/.nanobot/config.json`
-
-### Providers
-
-> [!TIP]
-> - **Groq** provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
-> - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
-> - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
-> - **VolcEngine Coding Plan**: If you're on VolcEngine's coding plan, set `"apiBase": "https://ark.cn-beijing.volces.com/api/coding/v3"` in your volcengine provider config.
-
-| Provider | Purpose | Get API Key |
-|----------|---------|-------------|
-| `custom` | Any OpenAI-compatible endpoint (direct, no LiteLLM) | — |
-| `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
-| `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
-| `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
-| `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
-| `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
-| `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
-| `minimax` | LLM (MiniMax direct) | [platform.minimaxi.com](https://platform.minimaxi.com) |
-| `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
-| `siliconflow` | LLM (SiliconFlow/硅基流动) | [siliconflow.cn](https://siliconflow.cn) |
-| `volcengine` | LLM (VolcEngine/火山引擎) | [volcengine.com](https://www.volcengine.com) |
-| `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
-| `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
-| `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
-| `vllm` | LLM (local, any OpenAI-compatible server) | — |
-| `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
-| `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
-
-<details>
-<summary><b>OpenAI Codex (OAuth)</b></summary>
-
-Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account.
-
-**1. Login:**
-```bash
-nanobot provider login openai-codex
-```
-
-**2. Set model** (merge into `~/.nanobot/config.json`):
-```json
-{
-  "agents": {
-    "defaults": {
-      "model": "openai-codex/gpt-5.1-codex"
-    }
-  }
-}
-```
-
-**3. Chat:**
-```bash
-nanobot agent -m "Hello!"
-```
-
-> Docker users: use `docker run -it` for interactive OAuth login.
-
-</details>
-
-<details>
-<summary><b>Custom Provider (Any OpenAI-compatible API)</b></summary>
-
-Connects directly to any OpenAI-compatible endpoint — LM Studio, llama.cpp, Together AI, Fireworks, Azure OpenAI, or any self-hosted server. Bypasses LiteLLM; model name is passed as-is.
-
-```json
-{
-  "providers": {
-    "custom": {
-      "apiKey": "your-api-key",
-      "apiBase": "https://api.your-provider.com/v1"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "model": "your-model-name"
-    }
-  }
-}
-```
-
-> For local servers that don't require a key, set `apiKey` to any non-empty string (e.g. `"no-key"`).
-
-</details>
-
-<details>
-<summary><b>vLLM (local / OpenAI-compatible)</b></summary>
-
-Run your own model with vLLM or any OpenAI-compatible server, then add to config:
-
-**1. Start the server** (example):
-```bash
-vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
-```
-
-**2. Add to config** (partial — merge into `~/.nanobot/config.json`):
-
-*Provider (key can be any non-empty string for local):*
-```json
-{
-  "providers": {
-    "vllm": {
-      "apiKey": "dummy",
-      "apiBase": "http://localhost:8000/v1"
-    }
-  }
-}
-```
-
-*Model:*
-```json
-{
-  "agents": {
-    "defaults": {
-      "model": "meta-llama/Llama-3.1-8B-Instruct"
-    }
-  }
-}
-```
-
-</details>
-
-<details>
-<summary><b>Adding a New Provider (Developer Guide)</b></summary>
-
-nanobot uses a **Provider Registry** (`nanobot/providers/registry.py`) as the single source of truth.
-Adding a new provider only takes **2 steps** — no if-elif chains to touch.
-
-**Step 1.** Add a `ProviderSpec` entry to `PROVIDERS` in `nanobot/providers/registry.py`:
-
-```python
-ProviderSpec(
-    name="myprovider",                   # config field name
-    keywords=("myprovider", "mymodel"),  # model-name keywords for auto-matching
-    env_key="MYPROVIDER_API_KEY",        # env var for LiteLLM
-    display_name="My Provider",          # shown in `nanobot status`
-    litellm_prefix="myprovider",         # auto-prefix: model → myprovider/model
-    skip_prefixes=("myprovider/",),      # don't double-prefix
-)
-```
-
-**Step 2.** Add a field to `ProvidersConfig` in `nanobot/config/schema.py`:
-
-```python
-class ProvidersConfig(BaseModel):
-    ...
-    myprovider: ProviderConfig = ProviderConfig()
-```
-
-That's it! Environment variables, model prefixing, config matching, and `nanobot status` display will all work automatically.
-
-**Common `ProviderSpec` options:**
-
-| Field | Description | Example |
-|-------|-------------|---------|
-| `litellm_prefix` | Auto-prefix model names for LiteLLM | `"dashscope"` → `dashscope/qwen-max` |
-| `skip_prefixes` | Don't prefix if model already starts with these | `("dashscope/", "openrouter/")` |
-| `env_extras` | Additional env vars to set | `(("ZHIPUAI_API_KEY", "{api_key}"),)` |
-| `model_overrides` | Per-model parameter overrides | `(("kimi-k2.5", {"temperature": 1.0}),)` |
-| `is_gateway` | Can route any model (like OpenRouter) | `True` |
-| `detect_by_key_prefix` | Detect gateway by API key prefix | `"sk-or-"` |
-| `detect_by_base_keyword` | Detect gateway by API base URL | `"openrouter"` |
-| `strip_model_prefix` | Strip existing prefix before re-prefixing | `True` (for AiHubMix) |
-
-</details>
-
-
-### MCP (Model Context Protocol)
-
-> [!TIP]
-> The config format is compatible with Claude Desktop / Cursor. You can copy MCP server configs directly from any MCP server's README.
-
-nanobot supports [MCP](https://modelcontextprotocol.io/) — connect external tool servers and use them as native agent tools.
-
-Add MCP servers to your `config.json`:
-
-```json
-{
-  "tools": {
-    "mcpServers": {
-      "filesystem": {
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
-      },
-      "my-remote-mcp": {
-        "url": "https://example.com/mcp/",
-        "headers": {
-          "Authorization": "Bearer xxxxx"
-        }
-      }
-    }
-  }
-}
-```
-
-Two transport modes are supported:
-
-| Mode | Config | Example |
-|------|--------|---------|
-| **Stdio** | `command` + `args` | Local process via `npx` / `uvx` |
-| **HTTP** | `url` + `headers` (optional) | Remote endpoint (`https://mcp.example.com/sse`) |
-
-Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
-
-```json
-{
-  "tools": {
-    "mcpServers": {
-      "my-slow-server": {
-        "url": "https://example.com/mcp/",
-        "toolTimeout": 120
-      }
-    }
-  }
-}
-```
-
-MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
-
-
-
-
-### Security
-
-> [!TIP]
-> For production deployments, set `"restrictToWorkspace": true` in your config to sandbox the agent.
-> **Change in source / post-`v0.1.4.post3`:** In `v0.1.4.post3` and earlier, an empty `allowFrom` means "allow all senders". In newer versions (including building from source), **empty `allowFrom` denies all access by default**. To allow all senders, set `"allowFrom": ["*"]`.
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
-| `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
-| `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
-
-
-## CLI Reference
-
-| Command | Description |
-|---------|-------------|
-| `nanobot onboard` | Initialize config & workspace |
-| `nanobot agent -m "..."` | Chat with the agent |
-| `nanobot agent` | Interactive chat mode |
-| `nanobot agent --no-markdown` | Show plain-text replies |
-| `nanobot agent --logs` | Show runtime logs during chat |
-| `nanobot gateway` | Start the gateway |
-| `nanobot status` | Show status |
-| `nanobot provider login openai-codex` | OAuth login for providers |
-| `nanobot channels login` | Link WhatsApp (scan QR) |
-| `nanobot channels status` | Show channel status |
-
-Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
-
-<details>
-<summary><b>Scheduled Tasks (Cron)</b></summary>
-
-```bash
-# Add a job
-nanobot cron add --name "daily" --message "Good morning!" --cron "0 9 * * *"
-nanobot cron add --name "hourly" --message "Check status" --every 3600
-
-# List jobs
-nanobot cron list
-
-# Remove a job
-nanobot cron remove <job_id>
-```
-
-</details>
-
-<details>
-<summary><b>Heartbeat (Periodic Tasks)</b></summary>
-
-The gateway wakes up every 30 minutes and checks `HEARTBEAT.md` in your workspace (`~/.nanobot/workspace/HEARTBEAT.md`). If the file has tasks, the agent executes them and delivers results to your most recently active chat channel.
-
-**Setup:** edit `~/.nanobot/workspace/HEARTBEAT.md` (created automatically by `nanobot onboard`):
-
-```markdown
-## Periodic Tasks
-
-- [ ] Check weather forecast and send a summary
-- [ ] Scan inbox for urgent emails
-```
-
-The agent can also manage this file itself — ask it to "add a periodic task" and it will update `HEARTBEAT.md` for you.
-
-> **Note:** The gateway must be running (`nanobot gateway`) and you must have chatted with the bot at least once so it knows which channel to deliver to.
-
-</details>
-
-## 🐳 Docker
-
-> [!TIP]
-> The `-v ~/.nanobot:/root/.nanobot` flag mounts your local config directory into the container, so your config and workspace persist across container restarts.
-
-### Docker Compose
-
-```bash
-docker compose run --rm nanobot-cli onboard   # first-time setup
-vim ~/.nanobot/config.json                     # add API keys
-docker compose up -d nanobot-gateway           # start gateway
-```
-
-```bash
-docker compose run --rm nanobot-cli agent -m "Hello!"   # run CLI
-docker compose logs -f nanobot-gateway                   # view logs
-docker compose down                                      # stop
-```
-
-### Docker
-
-```bash
-# Build the image
-docker build -t nanobot .
-
-# Initialize config (first time only)
-docker run -v ~/.nanobot:/root/.nanobot --rm nanobot onboard
-
-# Edit config on host to add API keys
-vim ~/.nanobot/config.json
-
-# Run gateway (connects to enabled channels, e.g. Telegram/Discord/Mochat)
-docker run -v ~/.nanobot:/root/.nanobot -p 18790:18790 nanobot gateway
-
-# Or run a single command
-docker run -v ~/.nanobot:/root/.nanobot --rm nanobot agent -m "Hello!"
-docker run -v ~/.nanobot:/root/.nanobot --rm nanobot status
-```
-
-## 🐧 Linux Service
-
-Run the gateway as a systemd user service so it starts automatically and restarts on failure.
-
-**1. Find the nanobot binary path:**
-
-```bash
-which nanobot   # e.g. /home/user/.local/bin/nanobot
-```
-
-**2. Create the service file** at `~/.config/systemd/user/nanobot-gateway.service` (replace `ExecStart` path if needed):
-
-```ini
-[Unit]
-Description=Nanobot Gateway
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=%h/.local/bin/nanobot gateway
-Restart=always
-RestartSec=10
-NoNewPrivileges=yes
-ProtectSystem=strict
-ReadWritePaths=%h
-
-[Install]
-WantedBy=default.target
-```
-
-**3. Enable and start:**
-
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now nanobot-gateway
-```
-
-**Common operations:**
-
-```bash
-systemctl --user status nanobot-gateway        # check status
-systemctl --user restart nanobot-gateway       # restart after config changes
-journalctl --user -u nanobot-gateway -f        # follow logs
-```
-
-If you edit the `.service` file itself, run `systemctl --user daemon-reload` before restarting.
-
-> **Note:** User services only run while you are logged in. To keep the gateway running after logout, enable lingering:
->
-> ```bash
-> loginctl enable-linger $USER
-> ```
-
-## 📁 Project Structure
-
-```
-nanobot/
-├── agent/          # 🧠 Core agent logic
-│   ├── loop.py     #    Agent loop (LLM ↔ tool execution)
-│   ├── context.py  #    Prompt builder
-│   ├── memory.py   #    Persistent memory
-│   ├── skills.py   #    Skills loader
-│   ├── subagent.py #    Background task execution
-│   └── tools/      #    Built-in tools (incl. spawn)
-├── skills/         # 🎯 Bundled skills (github, weather, tmux...)
-├── channels/       # 📱 Chat channel integrations
-├── bus/            # 🚌 Message routing
-├── cron/           # ⏰ Scheduled tasks
-├── heartbeat/      # 💓 Proactive wake-up
-├── providers/      # 🤖 LLM providers (OpenRouter, etc.)
-├── session/        # 💬 Conversation sessions
-├── config/         # ⚙️ Configuration
-└── cli/            # 🖥️ Commands
-```
-
-## 🤝 Contribute & Roadmap
-
-PRs welcome! The codebase is intentionally small and readable. 🤗
-
-**Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
-
-- [ ] **Multi-modal** — See and hear (images, voice, video)
-- [ ] **Long-term memory** — Never forget important context
-- [ ] **Better reasoning** — Multi-step planning and reflection
-- [ ] **More integrations** — Calendar and more
-- [ ] **Self-improvement** — Learn from feedback and mistakes
-
-### Contributors
-
-<a href="https://github.com/HKUDS/nanobot/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=HKUDS/nanobot&max=100&columns=12&updated=20260210" alt="Contributors" />
-</a>
-
-
-## ⭐ Star History
-
-<div align="center">
-  <a href="https://star-history.com/#HKUDS/nanobot&Date">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=HKUDS/nanobot&type=Date&theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=HKUDS/nanobot&type=Date" />
-      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=HKUDS/nanobot&type=Date" style="border-radius: 15px; box-shadow: 0 0 30px rgba(0, 217, 255, 0.3);" />
-    </picture>
-  </a>
-</div>
-
-<p align="center">
-  <em> Thanks for visiting ✨ nanobot!</em><br><br>
-  <img src="https://visitor-badge.laobi.icu/badge?page_id=HKUDS.nanobot&style=for-the-badge&color=00d4ff" alt="Views">
-</p>
-
-
-<p align="center">
-  <sub>nanobot is for educational, research, and technical exchange purposes only</sub>
-</p>
-
-## 🎮 Game Customer Service Extension — 大楚复古智能客服
-
-This repository includes an extension module `nanobot.game_cs` that implements a full SOP-driven customer service system for the game **《顽石英雄之大楚复古》**, while keeping the core nanobot framework untouched.
-
-### ✨ What's new in v2
-
-| Feature | Description |
-|---------|-------------|
-| **SOP State Machine** | 13-state flow: GREETING → COLLECTING_INFO → VALIDATING → BINDING → SENDING_CODE → follow-ups |
-| **Three-Factor Extraction** | Auto-parses `area_name` (几区) + `role_name` from free-form Chinese text; `game_name` defaults automatically |
-| **4-Code Dispatch** | Sends daily check-in code, lucky draw code, universal code, and guild code upon successful binding |
-| **Follow-up Scheduler** | 30-min lottery sign-up prompt + 1-hour fission/invite prompt via `/cron/process-followups` |
-| **Next-day Visit** | Proactive re-engagement via `/cron/next-day-visits` |
-| **Personality System** | 4 agent personalities: `lively` / `professional` / `steady` / `humorous` |
-| **KB Search** | Post-binding questions answered via OpenViking `find()` / `search()` with conversation context |
-| **Session Memory** | Conversation committed to OpenViking memory in the background for user profiling |
-| **Mock Mode** | `GAME_CS_MOCK_API=true` (default) — demo the full flow without a real game API |
-
-### 🚀 Quick Start
+### 2.2 安装依赖
 
 ```bash
 pip install -e ".[game_cs]"
-
-export GAME_CS_SERVICE_TOKEN="replace-with-strong-token"
-export GAME_CS_CODE_DAILY_CHECKIN="DC001"
-export GAME_CS_CODE_LUCKY_DRAW="TX002"
-export GAME_CS_CODE_UNIVERSAL="ws888"
-export GAME_CS_CODE_GUILD="FgYdqf6"
-
-nanobot-game-cs --host 0.0.0.0 --port 8011
 ```
 
-### 💬 Typical Conversation
+如果你还要跑测试：
 
-```
-[Bot]  Hello! 哥~ 来啦！是玩顽石英雄的老板吧😊
-       告诉小妹您在哪个大区、几区，角色名叫啥，小妹马上给您安排兑换码~
-
-[User] 裁决18区，角色叫战神无双
-
-[Bot]  哥~ 兑换码来啦！记得每天找小妹打卡哦😉
-
-       每日打卡：DC001
-       天选：TX002
-       通码：ws888
-       供宗号：FgYdqf6
-
-       有效期24小时，有啥问题随时喊我~🌹
-
-— 30 min later (via /cron/process-followups) —
-
-[Bot]  哥 跟您说个好事[愉快]连续找小妹签到3天，有一次抽奖机会，
-       最高免费抽充值赞助，小妹特地给您申请的，要帮您登记嘛~[玫瑰]
-
-— 1 hour later —
-
-[Bot]  哥，先给您登记上了[爱心]您喊朋友一起来玩，小妹给您安排抽路费转盘，
-       最高拿1000真冲[玫瑰]人多热闹才有意思，您身边有爱玩传奇的朋友嘛？
+```bash
+pip install -e ".[game_cs,dev]"
 ```
 
-### ⚙️ Key Environment Variables
+## 3. 核心进程
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GAME_CS_SERVICE_TOKEN` | `dev-token` | Auth token for all API calls |
-| `GAME_CS_PERSONALITY` | `lively` | Agent personality: lively / professional / steady / humorous |
-| `GAME_CS_MOCK_API` | `true` | Skip real game API calls (demo mode) |
-| `GAME_CS_CODE_DAILY_CHECKIN` | `DCXXX` | Daily check-in code (update each day) |
-| `GAME_CS_CODE_LUCKY_DRAW` | `TXYYY` | Lucky draw code (update each day) |
-| `GAME_CS_CODE_UNIVERSAL` | `ws888` | Universal code |
-| `GAME_CS_CODE_GUILD` | `FgYdqf6` | Guild code |
-| `GAME_CS_FOLLOWUP_30M_DELAY` | `1800` | Seconds until 30-min follow-up fires |
-| `GAME_CS_FOLLOWUP_1H_DELAY` | `3600` | Seconds until 1-hour fission follow-up fires |
-| `GAME_CS_OPENVIKING_PATH` | `.nanobot/openviking_data` | Embedded OpenViking data directory |
+本项目通常会启动两个进程。
 
-### 📡 API Endpoints
+### 3.1 客服进程
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/healthz` | Health check |
-| `POST` | `/webhook/game-message` | Main SOP webhook (player messages) |
-| `POST` | `/cron/process-followups` | Trigger due 30-min / 1-hour follow-ups |
-| `POST` | `/cron/next-day-visits` | Trigger due next-day visits |
-| `POST` | `/admin/index-kb` | Index files into OpenViking knowledge base |
-| `POST` | `/admin/update-codes` | Hot-update daily redeem codes |
-| `POST` | `/admin/reset-session` | Reset a user's SOP session to GREETING |
-| `GET` | `/admin/session/{user_id}` | Inspect a user's current SOP state |
+```bash
+set GAME_CS_AI_ENABLED=true
+python -m nanobot.game_cs.service --host 127.0.0.1 --port 8011
+```
 
-Interactive docs available at `http://localhost:8011/docs` after startup.
+这个进程负责：
 
-Full guide: [`GAME_CUSTOMER_SERVICE.md`](GAME_CUSTOMER_SERVICE.md)
+- 接收客户消息
+- 推进客户 SOP
+- 调用知识库 / AI
+- 生成人工待处理工单
+- 暴露管理接口给 `gateway`
+
+### 3.2 管理端进程
+
+```bash
+set NANOBOT_GAME_CS_ADMIN_BASE_URL=http://127.0.0.1:8011
+set NANOBOT_GAME_CS_ADMIN_TOKEN=你的_GAME_CS_SERVICE_TOKEN
+python -m nanobot.cli.commands gateway -p 18790
+```
+
+这个进程负责：
+
+- 承接钉钉 / 飞书等管理员消息
+- 让 agent 调用 `game_cs_admin` 工具
+- 将管理动作转发到 `game_cs` admin API
+
+## 4. 最小可用配置
+
+### 4.1 game_cs 必填环境变量
+
+最少需要：
+
+```bash
+set GAME_CS_SERVICE_TOKEN=replace-with-strong-token
+set GAME_CS_AI_ENABLED=true
+```
+
+推荐再配置：
+
+```bash
+set GAME_CS_DB_PATH=.nanobot/game_cs.db
+set GAME_CS_UPLOADS_DIR=.nanobot/game_cs_uploads
+set GAME_CS_OPENVIKING_PATH=.nanobot/openviking_data
+set GAME_CS_OPENVIKING_TARGET_URI=viking://resources/game-cs/
+set GAME_CS_PERSONALITY=lively
+set GAME_CS_ADMIN_GATEWAY_ENABLED=true
+set GAME_CS_ADMIN_GATEWAY_URL=http://127.0.0.1:18790/message
+```
+
+### 4.2 gateway 对接 game_cs 必填环境变量
+
+```bash
+set NANOBOT_GAME_CS_ADMIN_BASE_URL=http://127.0.0.1:8011
+set NANOBOT_GAME_CS_ADMIN_TOKEN=replace-with-strong-token
+```
+
+`NANOBOT_GAME_CS_ADMIN_TOKEN` 必须和 `GAME_CS_SERVICE_TOKEN` 保持一致。
+
+## 5. 管理能力说明
+
+当前管理端已经支持通过 `gateway` 管理运行中的 `python -m nanobot.game_cs.service` 进程。
+
+### 5.1 可查看的数据
+
+- 当前总客户数
+- 打开中的客户数
+- 已关闭客户数
+- 最近 24 小时活跃客户数
+- 已绑定客户数
+- 各个 SOP 阶段的客户数量
+- 待人工处理工单数
+- 已回答工单数
+- 已送达工单数
+- 客户列表
+- 单个客户详情
+- 单个客户最近消息
+
+### 5.2 可执行的动作
+
+- 查看客户列表
+- 查看某个客户详情
+- 查看某个客户最近消息
+- 给某个客户主动发消息
+- 重置某个客户会话
+- 强制关闭某个客户
+- 重新打开某个已关闭客户
+- 查看人工待处理工单
+- 对人工工单直接回复
+
+## 6. 管理员在钉钉 / 飞书里的使用方式
+
+前提：
+
+1. `gateway` 已启动
+2. 对应的钉钉 / 飞书渠道已在 nanobot 配置中启用
+3. 管理员账号已加入该渠道的允许名单
+4. `NANOBOT_GAME_CS_ADMIN_BASE_URL` 和 `NANOBOT_GAME_CS_ADMIN_TOKEN` 已配置
+
+管理员可以直接给机器人发自然语言，例如：
+
+- 查看当前客服统计
+- 列出最近 20 个客户
+- 列出当前处于 collecting_info 的客户
+- 查看客户 `player_1001` 的详情
+- 查看客户 `player_1001` 最近消息
+- 给客户 `player_1001` 发消息：请重新登录后再试
+- 重置客户 `player_1001` 的会话
+- 关闭客户 `player_1001`
+- 重新打开客户 `player_1001`
+- 查看待人工处理工单
+- 回复工单 `42`：请提供角色截图，我帮你继续处理
+
+建议让管理员按这种格式提问，模型调用工具会更稳定：
+
+```text
+查看客户 player_1001 详情
+给客户 player_1001 发消息：请稍后 5 分钟再试
+回复工单 42，用户 player_1001：请重新登录后再尝试
+```
+
+## 7. 客服进程对外接口
+
+所有 admin / webhook / cron 接口都需要：
+
+```http
+X-Game-Cs-Token: <GAME_CS_SERVICE_TOKEN>
+```
+
+### 7.1 健康检查
+
+#### `GET /healthz`
+
+示例：
+
+```bash
+curl http://127.0.0.1:8011/healthz
+```
+
+### 7.2 客户消息入口
+
+#### `POST /webhook/game-message`
+
+用于你的真实聊天系统把客户消息转给 `game_cs`。
+
+示例：
+
+```bash
+curl -X POST http://127.0.0.1:8011/webhook/game-message ^
+  -H "Content-Type: application/json" ^
+  -H "X-Game-Cs-Token: %GAME_CS_SERVICE_TOKEN%" ^
+  -d "{\"user_id\":\"player_1001\",\"message\":\"18区 战神无双\",\"metadata\":{\"chat_id\":\"chat_001\",\"channel\":\"mowebchat\"}}"
+```
+
+请求体字段：
+
+- `user_id`: 平台内唯一客户 ID
+- `message`: 客户文本消息
+- `screenshot_b64`: 可选，base64 图片
+- `screenshot_ext`: 可选，默认 `png`
+- `screenshot_url`: 可选，图片 URL
+- `metadata.chat_id`: 可选，后续主动推送消息时使用
+- `metadata.channel`: 可选，来源渠道名
+
+返回值包含：
+
+- `reply`
+- `sop_state`
+- `next_step`
+- `bound`
+- `codes`
+- `timestamp`
+
+### 7.3 Cron 接口
+
+#### `POST /cron/process-followups`
+
+处理 30 分钟 / 1 小时回访。
+
+```bash
+curl -X POST http://127.0.0.1:8011/cron/process-followups ^
+  -H "X-Game-Cs-Token: %GAME_CS_SERVICE_TOKEN%"
+```
+
+#### `POST /cron/next-day-visits`
+
+处理次日回访。
+
+```bash
+curl -X POST http://127.0.0.1:8011/cron/next-day-visits ^
+  -H "X-Game-Cs-Token: %GAME_CS_SERVICE_TOKEN%"
+```
+
+## 8. game_cs Admin API
+
+这部分接口是 `gateway` 管理端实际调用的接口。
+
+### 8.1 知识库和基础管理
+
+#### `POST /admin/index-kb`
+
+导入知识库资源。
+
+```bash
+curl -X POST http://127.0.0.1:8011/admin/index-kb ^
+  -H "Content-Type: application/json" ^
+  -H "X-Game-Cs-Token: %GAME_CS_SERVICE_TOKEN%" ^
+  -d "[\"./knowledge/faq.md\",\"./knowledge/sop_guide.md\"]"
+```
+
+#### `POST /admin/update-codes`
+
+热更新兑换码。
+
+#### `POST /admin/reset-session?user_id=<user_id>`
+
+重置某个客户会话。
+
+#### `GET /admin/session/{user_id}`
+
+获取兼容旧接口的会话详情。
+
+### 8.2 统计与客户管理
+
+#### `GET /admin/stats`
+
+返回整体统计信息。
+
+```bash
+curl http://127.0.0.1:8011/admin/stats ^
+  -H "X-Game-Cs-Token: %GAME_CS_SERVICE_TOKEN%"
+```
+
+返回重点字段：
+
+- `service.version`
+- `service.ai_enabled`
+- `summary.total_customers`
+- `summary.open_customers`
+- `summary.closed_customers`
+- `summary.bound_customers`
+- `summary.active_24h`
+- `summary.pending_human_queries`
+- `summary.answered_human_queries`
+- `summary.delivered_human_queries`
+- `summary.sop_state_counts`
+
+#### `GET /admin/customers`
+
+查询客户列表。
+
+支持参数：
+
+- `limit`
+- `include_closed`
+- `sop_state`
+- `query`
+
+示例：
+
+```bash
+curl "http://127.0.0.1:8011/admin/customers?limit=20&include_closed=false" ^
+  -H "X-Game-Cs-Token: %GAME_CS_SERVICE_TOKEN%"
+```
+
+#### `GET /admin/customer/{user_id}`
+
+查看客户详情、最近消息、相关人工工单。
+
+支持参数：
+
+- `message_limit`
+
+示例：
+
+```bash
+curl "http://127.0.0.1:8011/admin/customer/player_1001?message_limit=20" ^
+  -H "X-Game-Cs-Token: %GAME_CS_SERVICE_TOKEN%"
+```
+
+#### `POST /admin/customer/{user_id}/message`
+
+主动给客户发送一条消息。
+
+```bash
+curl -X POST http://127.0.0.1:8011/admin/customer/player_1001/message ^
+  -H "Content-Type: application/json" ^
+  -H "X-Game-Cs-Token: %GAME_CS_SERVICE_TOKEN%" ^
+  -d "{\"reply\":\"请重新登录后再试\"}"
+```
+
+注意：
+
+- 只有该客户已经记录了 `metadata.chat_id` / 会话 chat_id，消息才能真正推送出去
+- 如果没有 chat_id，接口仍会记录消息，但返回 `delivered=false`
+
+#### `POST /admin/customer/{user_id}/reset`
+
+重置客户 SOP。
+
+```bash
+curl -X POST http://127.0.0.1:8011/admin/customer/player_1001/reset ^
+  -H "X-Game-Cs-Token: %GAME_CS_SERVICE_TOKEN%"
+```
+
+#### `POST /admin/customer/{user_id}/close`
+
+关闭或重新打开客户。
+
+关闭：
+
+```bash
+curl -X POST http://127.0.0.1:8011/admin/customer/player_1001/close ^
+  -H "Content-Type: application/json" ^
+  -H "X-Game-Cs-Token: %GAME_CS_SERVICE_TOKEN%" ^
+  -d "{\"closed\":true}"
+```
+
+重新打开：
+
+```bash
+curl -X POST http://127.0.0.1:8011/admin/customer/player_1001/close ^
+  -H "Content-Type: application/json" ^
+  -H "X-Game-Cs-Token: %GAME_CS_SERVICE_TOKEN%" ^
+  -d "{\"closed\":false}"
+```
+
+说明：
+
+- 被关闭的客户不会被删除
+- 客户再次发来新消息时，系统会自动重新打开该客户
+
+### 8.3 人工工单管理
+
+#### `GET /admin/human-queries`
+
+查看人工工单。
+
+支持参数：
+
+- `status`
+
+示例：
+
+```bash
+curl "http://127.0.0.1:8011/admin/human-queries?status=pending" ^
+  -H "X-Game-Cs-Token: %GAME_CS_SERVICE_TOKEN%"
+```
+
+#### `POST /admin/human-reply`
+
+回复人工工单。
+
+```bash
+curl -X POST http://127.0.0.1:8011/admin/human-reply ^
+  -H "Content-Type: application/json" ^
+  -H "X-Game-Cs-Token: %GAME_CS_SERVICE_TOKEN%" ^
+  -d "{\"user_id\":\"player_1001\",\"query_id\":42,\"reply\":\"请重新登录后再试\"}"
+```
+
+如果客户当前有可用 chat_id，回复会尝试直接推送给客户。
+
+## 9. gateway 接口
+
+### 9.1 健康检查
+
+#### `GET /healthz`
+
+```bash
+curl http://127.0.0.1:18790/healthz
+```
+
+### 9.2 发消息到管理员当前会话
+
+#### `POST /message`
+
+`game_cs` 在需要人工介入时，会通过这个接口把待处理消息发给管理员所在的钉钉 / 飞书会话。
+
+```bash
+curl -X POST http://127.0.0.1:18790/message ^
+  -H "Content-Type: application/json" ^
+  -d "{\"text\":\"【待处理】Query ID: 42\\n用户ID: player_1001\\n问题: 登录失败\"}"
+```
+
+也可以显式指定目标：
+
+```bash
+curl -X POST http://127.0.0.1:18790/message ^
+  -H "Content-Type: application/json" ^
+  -d "{\"text\":\"测试消息\",\"channel\":\"dingtalk\",\"chat_id\":\"admin_room_1\"}"
+```
+
+## 10. 真实聊天系统接入建议
+
+你后续接入自研聊天系统时，推荐按下面方式做：
+
+1. 聊天系统收到客户消息
+2. 转发到 `POST /webhook/game-message`
+3. 把客户平台 ID 作为 `user_id`
+4. 把当前会话 ID 作为 `metadata.chat_id`
+5. 把渠道名写入 `metadata.channel`
+6. 将返回的 `reply` 回发给客户
+
+只要 `metadata.chat_id` 存进来了，后续管理端就能：
+
+- 主动给客户发消息
+- 回复人工工单后直接下发给客户
+- 继续跟踪该客户的 SOP
+
+## 11. 常见启动示例
+
+### 11.1 本地最小联调
+
+终端 1：
+
+```bash
+set GAME_CS_SERVICE_TOKEN=test-token
+set GAME_CS_AI_ENABLED=true
+python -m nanobot.game_cs.service --host 127.0.0.1 --port 8011
+```
+
+终端 2：
+
+```bash
+set NANOBOT_GAME_CS_ADMIN_BASE_URL=http://127.0.0.1:8011
+set NANOBOT_GAME_CS_ADMIN_TOKEN=test-token
+python -m nanobot.cli.commands gateway -p 18790
+```
+
+### 11.2 手工测试客户消息
+
+```bash
+curl -X POST http://127.0.0.1:8011/webhook/game-message ^
+  -H "Content-Type: application/json" ^
+  -H "X-Game-Cs-Token: test-token" ^
+  -d "{\"user_id\":\"player_1001\",\"message\":\"18区 战神无双\",\"metadata\":{\"chat_id\":\"chat_001\",\"channel\":\"mowebchat\"}}"
+```
+
+### 11.3 手工测试统计
+
+```bash
+curl http://127.0.0.1:8011/admin/stats ^
+  -H "X-Game-Cs-Token: test-token"
+```
+
+## 12. 测试
+
+本次管理能力相关测试可以直接运行：
+
+```bash
+.\.venv\Scripts\python.exe -m pytest tests\game_cs\test_admin_api.py tests\test_game_cs_admin_tool.py tests\test_commands.py -q
+```
+
+## 13. 关键文件
+
+- [nanobot/game_cs/service.py](F:/project/nanobot-customer-service/nanobot-game-customer-service/nanobot/game_cs/service.py)
+- [nanobot/game_cs/storage.py](F:/project/nanobot-customer-service/nanobot-game-customer-service/nanobot/game_cs/storage.py)
+- [nanobot/agent/tools/game_cs_admin.py](F:/project/nanobot-customer-service/nanobot-game-customer-service/nanobot/agent/tools/game_cs_admin.py)
+- [nanobot/cli/commands.py](F:/project/nanobot-customer-service/nanobot-game-customer-service/nanobot/cli/commands.py)
+- [GAME_CUSTOMER_SERVICE.md](F:/project/nanobot-customer-service/nanobot-game-customer-service/GAME_CUSTOMER_SERVICE.md)
+
+## 14. 当前版本结论
+
+当前代码已经满足下面这条链路：
+
+1. `python -m nanobot.game_cs.service --host 127.0.0.1 --port 8011` 运行客户接待进程
+2. `python -m nanobot.cli.commands gateway -p 18790` 运行管理端
+3. 管理员通过钉钉 / 飞书机器人进入管理端
+4. 管理端可查看统计、查看客户、查看消息、主动发消息、重置会话、关闭客户、查看人工工单、回复人工工单
+
+如果后续你还要继续扩展，我建议下一步加这两项：
+
+- 为管理员约束一套固定指令模板，降低大模型误调用概率
+- 给 `game_cs` 增加专门的“客户标签 / 来源渠道 / 最近处理人”字段，便于运营统计

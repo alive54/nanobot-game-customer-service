@@ -92,6 +92,18 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Mochat channel not available: {}", e)
 
+        # Mowebchat channel
+        if self.config.channels.mowebchat.enabled:
+            try:
+                from nanobot.channels.mowebchat import MowebchatChannel
+
+                self.channels["mowebchat"] = MowebchatChannel(
+                    self.config.channels.mowebchat, self.bus
+                )
+                logger.info("Mowebchat channel enabled")
+            except ImportError as e:
+                logger.warning("Mowebchat channel not available: {}", e)
+
         # DingTalk channel
         if self.config.channels.dingtalk.enabled:
             try:

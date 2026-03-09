@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 import weakref
 from contextlib import AsyncExitStack
@@ -18,7 +17,6 @@ from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
-from nanobot.agent.tools.game_cs_admin import GameCSAdminTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
@@ -129,15 +127,6 @@ class AgentLoop:
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
-        game_cs_admin_base_url = os.getenv("NANOBOT_GAME_CS_ADMIN_BASE_URL", "").strip()
-        game_cs_admin_token = os.getenv("NANOBOT_GAME_CS_ADMIN_TOKEN", "").strip()
-        if game_cs_admin_base_url and game_cs_admin_token:
-            self.tools.register(
-                GameCSAdminTool(
-                    base_url=game_cs_admin_base_url,
-                    token=game_cs_admin_token,
-                )
-            )
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 

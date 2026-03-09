@@ -106,6 +106,26 @@ class GameCSAIRuntime:
         kb_context: list[str],
         history: list[dict],
         timeout_ms: int | None = None,
+    ) -> str | None:
+        result = self.ask_agent_structured_sync(
+            session_key,
+            user_text,
+            kb_context,
+            history,
+            timeout_ms=timeout_ms,
+        )
+        if not result:
+            return None
+        reply = str(result.get("reply", "")).strip()
+        return reply or None
+
+    def ask_agent_structured_sync(
+        self,
+        session_key: str,
+        user_text: str,
+        kb_context: list[str],
+        history: list[dict],
+        timeout_ms: int | None = None,
     ) -> dict | None:
         try:
             future = asyncio.run_coroutine_threadsafe(
@@ -117,7 +137,9 @@ class GameCSAIRuntime:
             return future.result(timeout=(timeout_ms or self._timeout_ms) / 1000)
         except Exception:
             logger.exception(
-                "ai_runtime.ask_agent_sync failed: session=%s", session_key, exc_info=True
+                "ai_runtime.ask_agent_structured_sync failed: session=%s",
+                session_key,
+                exc_info=True,
             )
             return None
 

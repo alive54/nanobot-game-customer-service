@@ -29,8 +29,6 @@ class SOPSessionState:
     follow_up_30m_sent: bool
     follow_up_1h_sent: bool
     next_day_visited: bool
-    is_closed: bool
-    closed_at: str | None
     created_at: str
     updated_at: str
 
@@ -93,8 +91,6 @@ class GameCSStore:
                     follow_up_30m_sent   INTEGER NOT NULL DEFAULT 0,
                     follow_up_1h_sent    INTEGER NOT NULL DEFAULT 0,
                     next_day_visited     INTEGER NOT NULL DEFAULT 0,
-                    is_closed            INTEGER NOT NULL DEFAULT 0,
-                    closed_at            TEXT,
                     created_at           TEXT    NOT NULL,
                     updated_at           TEXT    NOT NULL
                 );
@@ -135,8 +131,6 @@ class GameCSStore:
             # Backward-compatible migrations for older DB files.
             self._ensure_column(conn, "sop_sessions", "game_role_id", "game_role_id TEXT")
             self._ensure_column(conn, "sop_sessions", "channel_chat_id", "channel_chat_id TEXT")
-            self._ensure_column(conn, "sop_sessions", "is_closed", "is_closed INTEGER NOT NULL DEFAULT 0")
-            self._ensure_column(conn, "sop_sessions", "closed_at", "closed_at TEXT")
             conn.commit()
 
     def get_or_create_session(
@@ -167,11 +161,9 @@ class GameCSStore:
                         follow_up_30m_sent,
                         follow_up_1h_sent,
                         next_day_visited,
-                        is_closed,
-                        closed_at,
                         created_at,
                         updated_at
-                    ) VALUES (?, 'greeting', ?, NULL, NULL, NULL, NULL, NULL, 0, NULL, 0, 0, 0, 0, NULL, ?, ?)
+                    ) VALUES (?, 'greeting', ?, NULL, NULL, NULL, NULL, NULL, 0, NULL, 0, 0, 0, ?, ?)
                     """,
                     (user_id, default_game_name, now, now),
                 )
@@ -198,8 +190,6 @@ class GameCSStore:
         follow_up_30m_sent: bool | object = _UNSET,
         follow_up_1h_sent: bool | object = _UNSET,
         next_day_visited: bool | object = _UNSET,
-        is_closed: bool | object = _UNSET,
-        closed_at: str | None | object = _UNSET,
         default_game_name: str = "顽石英雄之大楚复古",
     ) -> SOPSessionState:
         cur = self.get_or_create_session(user_id, default_game_name)
@@ -224,8 +214,6 @@ class GameCSStore:
                     follow_up_30m_sent = ?,
                     follow_up_1h_sent  = ?,
                     next_day_visited   = ?,
-                    is_closed          = ?,
-                    closed_at          = ?,
                     updated_at         = ?
                 WHERE user_id = ?
                 """,
@@ -242,8 +230,6 @@ class GameCSStore:
                     int(v(follow_up_30m_sent, cur.follow_up_30m_sent)),
                     int(v(follow_up_1h_sent, cur.follow_up_1h_sent)),
                     int(v(next_day_visited, cur.next_day_visited)),
-                    int(v(is_closed, cur.is_closed)),
-                    v(closed_at, cur.closed_at),
                     now,
                     user_id,
                 ),
@@ -277,8 +263,6 @@ class GameCSStore:
                     follow_up_30m_sent=0,
                     follow_up_1h_sent=0,
                     next_day_visited=0,
-                    is_closed=0,
-                    closed_at=NULL,
                     updated_at=?
                 WHERE user_id=?
                 """,
@@ -286,30 +270,6 @@ class GameCSStore:
             )
             conn.commit()
         return self.get_or_create_session(user_id, default_game_name)
-
-    def close_session(
-        self,
-        user_id: str,
-        default_game_name: str,
-    ) -> SOPSessionState:
-        return self.update_session(
-            user_id,
-            is_closed=True,
-            closed_at=_now_iso(),
-            default_game_name=default_game_name,
-        )
-
-    def reopen_session(
-        self,
-        user_id: str,
-        default_game_name: str,
-    ) -> SOPSessionState:
-        return self.update_session(
-            user_id,
-            is_closed=False,
-            closed_at=None,
-            default_game_name=default_game_name,
-        )
 
     def get_pending_30m_followups(self, now_iso: str) -> list[SOPSessionState]:
         with self._connect() as conn:
@@ -378,9 +338,6 @@ class GameCSStore:
             ).fetchall()
         return [dict(r) for r in reversed(rows)]
 
-    def get_session_messages(self, user_id: str, limit: int = 20) -> list[dict]:
-        return self.get_recent_messages(user_id, limit=limit)
-
     def create_human_query(self, user_id: str, question: str) -> int:
         with self._connect() as conn:
             cur = conn.execute(
@@ -438,102 +395,6 @@ class GameCSStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def list_human_queries(self, status: str | None = None) -> list[dict]:
-        sql = [
-            """
-            SELECT id, user_id, question, status, human_reply, created_at, answered_at
-            FROM pending_human_queries
-            """
-        ]
-        params: list[Any] = []
-        if status:
-            sql.append("WHERE status = ?")
-            params.append(status)
-        sql.append("ORDER BY id ASC")
-        with self._connect() as conn:
-            rows = conn.execute(" ".join(sql), params).fetchall()
-        return [dict(r) for r in rows]
-
-    def list_sessions(
-        self,
-        *,
-        limit: int = 100,
-        include_closed: bool = True,
-        sop_state: str | None = None,
-        query: str | None = None,
-    ) -> list[SOPSessionState]:
-        sql = ["SELECT * FROM sop_sessions WHERE 1=1"]
-        params: list[Any] = []
-        if not include_closed:
-            sql.append("AND is_closed = 0")
-        if sop_state:
-            sql.append("AND sop_state = ?")
-            params.append(sop_state)
-        if query:
-            like = f"%{query}%"
-            sql.append(
-                "AND (user_id LIKE ? OR COALESCE(area_name, '') LIKE ? OR COALESCE(role_name, '') LIKE ?)"
-            )
-            params.extend([like, like, like])
-        sql.append("ORDER BY datetime(updated_at) DESC LIMIT ?")
-        params.append(limit)
-        with self._connect() as conn:
-            rows = conn.execute(" ".join(sql), params).fetchall()
-        return [_row_to_state(r) for r in rows]
-
-    def get_summary_counts(self) -> dict[str, Any]:
-        with self._connect() as conn:
-            total_customers = conn.execute("SELECT COUNT(*) FROM sop_sessions").fetchone()[0]
-            open_customers = conn.execute(
-                "SELECT COUNT(*) FROM sop_sessions WHERE is_closed = 0"
-            ).fetchone()[0]
-            closed_customers = conn.execute(
-                "SELECT COUNT(*) FROM sop_sessions WHERE is_closed = 1"
-            ).fetchone()[0]
-            bound_customers = conn.execute(
-                """
-                SELECT COUNT(*) FROM sop_sessions
-                WHERE sop_state IN (
-                    'sending_code', 'follow_up_pending', 'follow_up_30min',
-                    'follow_up_1hour', 'silent', 'next_day_visit',
-                    'reactivation', 'completed'
-                )
-                """
-            ).fetchone()[0]
-            active_24h = conn.execute(
-                "SELECT COUNT(*) FROM sop_sessions WHERE datetime(updated_at) >= datetime('now', '-1 day')"
-            ).fetchone()[0]
-            pending_human_queries = conn.execute(
-                "SELECT COUNT(*) FROM pending_human_queries WHERE status = 'pending'"
-            ).fetchone()[0]
-            answered_human_queries = conn.execute(
-                "SELECT COUNT(*) FROM pending_human_queries WHERE status = 'answered'"
-            ).fetchone()[0]
-            delivered_human_queries = conn.execute(
-                "SELECT COUNT(*) FROM pending_human_queries WHERE status = 'delivered'"
-            ).fetchone()[0]
-            state_rows = conn.execute(
-                """
-                SELECT sop_state, COUNT(*) AS count
-                FROM sop_sessions
-                GROUP BY sop_state
-                ORDER BY count DESC, sop_state ASC
-                """
-            ).fetchall()
-        return {
-            "total_customers": int(total_customers),
-            "open_customers": int(open_customers),
-            "closed_customers": int(closed_customers),
-            "bound_customers": int(bound_customers),
-            "active_24h": int(active_24h),
-            "pending_human_queries": int(pending_human_queries),
-            "answered_human_queries": int(answered_human_queries),
-            "delivered_human_queries": int(delivered_human_queries),
-            "sop_state_counts": {
-                str(row["sop_state"]): int(row["count"]) for row in state_rows
-            },
-        }
-
 
 def _row_to_state(row: sqlite3.Row) -> SOPSessionState:
     return SOPSessionState(
@@ -550,8 +411,6 @@ def _row_to_state(row: sqlite3.Row) -> SOPSessionState:
         follow_up_30m_sent=bool(row["follow_up_30m_sent"]),
         follow_up_1h_sent=bool(row["follow_up_1h_sent"]),
         next_day_visited=bool(row["next_day_visited"]),
-        is_closed=bool(row["is_closed"]) if "is_closed" in row.keys() else False,
-        closed_at=row["closed_at"] if "closed_at" in row.keys() else None,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )

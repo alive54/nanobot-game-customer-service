@@ -113,14 +113,6 @@ class HumanReplyIn(BaseModel):
     reply: str
 
 
-class AdminMessageIn(BaseModel):
-    reply: str
-
-
-class AdminCloseSessionIn(BaseModel):
-    closed: bool = True
-
-
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -195,6 +187,14 @@ def _extract_role_name(text: str, area_name: str | None = None) -> str | None:
     working = text
     if area_name:
         working = working.replace(area_name, " ")
+        simple_candidate = re.sub(r"[\s，。！？、,.!?]", "", working).strip()
+        if (
+            simple_candidate
+            and simple_candidate not in _ROLE_STOPWORDS
+            and 2 <= len(simple_candidate) <= 16
+            and re.fullmatch(r"[\w\u4e00-\u9fff]{2,16}", simple_candidate)
+        ):
+            return simple_candidate
 
     for pat in _ROLE_PATTERNS:
         m = pat.search(working)
@@ -384,8 +384,6 @@ def _handle_message(
 
     store.append_message(user_id, "user", user_text or "<no text>")
     session = store.get_or_create_session(user_id, default_game_name=cfg.default_game_name)
-    if session.is_closed:
-        session = store.reopen_session(user_id, default_game_name=cfg.default_game_name)
 
     screenshot_path = _persist_screenshot(cfg, payload)
     if screenshot_path:
@@ -490,7 +488,7 @@ def _handle_message(
                     has_role=bool(new_role),
                     ai_runtime=ai_runtime,
                 )
-                print("Intent:", intent)
+                logger.debug("collecting intent=%s user_id=%s", intent, user_id)
                 if intent == CollectingIntent.PARTIAL_INFO:
                     store.update_session(
                         user_id,
@@ -652,16 +650,32 @@ def _kb_reply(
             if len(history_for_ai) >= 2
             else kb.search(user_text, limit=10, include_l2=True)
         )
-        print("KB context for AI:", kb_ctx)
+        logger.debug("KB context for AI user_id=%s context=%s", user_id, kb_ctx)
         ai_result = _ai_run_sync(
             ai_runtime,
-            "ask_agent_sync",
+            "ask_agent_structured_sync",
             f"game_cs:{user_id}",
             user_text,
             kb_ctx,
             history_for_ai,
             timeout_ms=cfg.ai_timeout_ms,
         )
+        if (
+            ai_result is not None
+            and not isinstance(ai_result, (dict, str))
+            and hasattr(ai_runtime, "ask_agent_sync")
+        ):
+            ai_result = _ai_run_sync(
+                ai_runtime,
+                "ask_agent_sync",
+                f"game_cs:{user_id}",
+                user_text,
+                kb_ctx,
+                history_for_ai,
+                timeout_ms=cfg.ai_timeout_ms,
+            )
+        if isinstance(ai_result, str):
+            ai_result = {"need_human": False, "reply": ai_result, "reason": "legacy_reply"}
         if ai_result and isinstance(ai_result, dict):
             need_human: bool = bool(ai_result.get("need_human", False))
             reply_text: str = str(ai_result.get("reply", "")).strip()
@@ -1044,48 +1058,6 @@ async def _deliver_human_reply(
             store.mark_query_delivered(int(q["id"]))
 
 
-def _session_to_dict(session) -> dict[str, Any]:
-    return {
-        "user_id": session.user_id,
-        "sop_state": session.sop_state,
-        "game_name": session.game_name,
-        "area_name": session.area_name,
-        "role_name": session.role_name,
-        "game_role_id": session.game_role_id,
-        "channel_chat_id": session.channel_chat_id,
-        "is_bound": session.is_bound,
-        "is_closed": session.is_closed,
-        "closed_at": session.closed_at,
-        "codes_sent_at": session.codes_sent_at,
-        "follow_up_30m_sent": session.follow_up_30m_sent,
-        "follow_up_1h_sent": session.follow_up_1h_sent,
-        "next_day_visited": session.next_day_visited,
-        "created_at": session.created_at,
-        "updated_at": session.updated_at,
-    }
-
-
-async def _admin_send_message(
-    user_id: str,
-    reply: str,
-    cfg: GameCSConfig,
-    store: GameCSStore,
-    channel_bridge: GameCSChannelBridge | None,
-) -> dict[str, Any]:
-    session = store.get_or_create_session(user_id, default_game_name=cfg.default_game_name)
-    if session.is_closed:
-        session = store.reopen_session(user_id, default_game_name=cfg.default_game_name)
-    store.append_message(user_id, "assistant", reply)
-    delivered = await _push_outbound(user_id, reply, store, channel_bridge)
-    refreshed = store.get_or_create_session(user_id, default_game_name=cfg.default_game_name)
-    return {
-        "ok": True,
-        "delivered": delivered,
-        "message": reply,
-        "session": _session_to_dict(refreshed),
-    }
-
-
 async def _run_check_human_reply(
     user_id: str,
     cfg: GameCSConfig,
@@ -1295,117 +1267,6 @@ def create_app(
         await _deliver_human_reply(payload.user_id, _cfg_box[0], store, _bridge)
         return {"ok": True}
 
-    @app.get("/admin/stats", tags=["admin"])
-    def admin_stats(
-        x_game_cs_token: str | None = Header(default=None),
-    ) -> dict[str, Any]:
-        if x_game_cs_token != _cfg_box[0].service_token:
-            raise HTTPException(status_code=401, detail="invalid token")
-        summary = store.get_summary_counts()
-        return {
-            "ok": True,
-            "service": {
-                "version": app.version,
-                "ai_enabled": bool(_cfg_box[0].ai_enabled),
-                "admin_gateway_enabled": bool(_cfg_box[0].admin_gateway_enabled),
-                "bridge_connected": _bridge is not None,
-                "db_path": str(_cfg_box[0].db_path),
-            },
-            "summary": summary,
-        }
-
-    @app.get("/admin/customers", tags=["admin"])
-    def list_customers(
-        limit: int = 100,
-        include_closed: bool = True,
-        sop_state: str | None = None,
-        query: str | None = None,
-        x_game_cs_token: str | None = Header(default=None),
-    ) -> dict[str, Any]:
-        if x_game_cs_token != _cfg_box[0].service_token:
-            raise HTTPException(status_code=401, detail="invalid token")
-        rows = store.list_sessions(
-            limit=max(1, min(limit, 500)),
-            include_closed=include_closed,
-            sop_state=sop_state,
-            query=query,
-        )
-        return {
-            "ok": True,
-            "count": len(rows),
-            "customers": [_session_to_dict(item) for item in rows],
-        }
-
-    @app.get("/admin/customer/{user_id}", tags=["admin"])
-    def get_customer_detail(
-        user_id: str,
-        message_limit: int = 20,
-        x_game_cs_token: str | None = Header(default=None),
-    ) -> dict[str, Any]:
-        if x_game_cs_token != _cfg_box[0].service_token:
-            raise HTTPException(status_code=401, detail="invalid token")
-        _safe_user_id(user_id)
-        session = store.get_or_create_session(user_id, default_game_name=_cfg_box[0].default_game_name)
-        human_queries = [
-            item for item in store.get_pending_queries_all() if str(item.get("user_id")) == user_id
-        ]
-        return {
-            "ok": True,
-            "customer": _session_to_dict(session),
-            "recent_messages": store.get_session_messages(user_id, limit=max(1, min(message_limit, 100))),
-            "human_queries": human_queries,
-        }
-
-    @app.post("/admin/customer/{user_id}/message", tags=["admin"])
-    async def admin_customer_message(
-        user_id: str,
-        payload: AdminMessageIn,
-        x_game_cs_token: str | None = Header(default=None),
-    ) -> dict[str, Any]:
-        if x_game_cs_token != _cfg_box[0].service_token:
-            raise HTTPException(status_code=401, detail="invalid token")
-        _safe_user_id(user_id)
-        reply = payload.reply.strip()
-        if not reply:
-            raise HTTPException(status_code=400, detail="reply cannot be empty")
-        return await _admin_send_message(user_id, reply, _cfg_box[0], store, _bridge)
-
-    @app.post("/admin/customer/{user_id}/reset", tags=["admin"])
-    def admin_customer_reset(
-        user_id: str,
-        x_game_cs_token: str | None = Header(default=None),
-    ) -> dict[str, Any]:
-        if x_game_cs_token != _cfg_box[0].service_token:
-            raise HTTPException(status_code=401, detail="invalid token")
-        _safe_user_id(user_id)
-        state = store.reset_session(user_id, default_game_name=_cfg_box[0].default_game_name)
-        return {"ok": True, "customer": _session_to_dict(state)}
-
-    @app.post("/admin/customer/{user_id}/close", tags=["admin"])
-    def admin_customer_close(
-        user_id: str,
-        payload: AdminCloseSessionIn,
-        x_game_cs_token: str | None = Header(default=None),
-    ) -> dict[str, Any]:
-        if x_game_cs_token != _cfg_box[0].service_token:
-            raise HTTPException(status_code=401, detail="invalid token")
-        _safe_user_id(user_id)
-        if payload.closed:
-            state = store.close_session(user_id, default_game_name=_cfg_box[0].default_game_name)
-        else:
-            state = store.reopen_session(user_id, default_game_name=_cfg_box[0].default_game_name)
-        return {"ok": True, "customer": _session_to_dict(state)}
-
-    @app.get("/admin/human-queries", tags=["admin"])
-    def admin_human_queries(
-        status: str | None = None,
-        x_game_cs_token: str | None = Header(default=None),
-    ) -> dict[str, Any]:
-        if x_game_cs_token != _cfg_box[0].service_token:
-            raise HTTPException(status_code=401, detail="invalid token")
-        items = store.list_human_queries(status=status)
-        return {"ok": True, "count": len(items), "queries": items}
-
     @app.post("/webhook/game-message", tags=["webhook"])
     async def on_message(
         payload: GameMessageIn,
@@ -1487,7 +1348,22 @@ def create_app(
             raise HTTPException(status_code=401, detail="invalid token")
         _safe_user_id(user_id)
         s = store.get_or_create_session(user_id, default_game_name=_cfg_box[0].default_game_name)
-        return _session_to_dict(s)
+        return {
+            "user_id": s.user_id,
+            "sop_state": s.sop_state,
+            "game_name": s.game_name,
+            "area_name": s.area_name,
+            "role_name": s.role_name,
+            "game_role_id": s.game_role_id,
+            "channel_chat_id": s.channel_chat_id,
+            "is_bound": s.is_bound,
+            "codes_sent_at": s.codes_sent_at,
+            "follow_up_30m_sent": s.follow_up_30m_sent,
+            "follow_up_1h_sent": s.follow_up_1h_sent,
+            "next_day_visited": s.next_day_visited,
+            "created_at": s.created_at,
+            "updated_at": s.updated_at,
+        }
 
     return app
 
