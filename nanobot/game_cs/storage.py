@@ -438,7 +438,7 @@ class GameCSStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def list_human_queries(self, status: str | None = None) -> list[dict]:
+    def list_human_queries(self, status: str | None = None, limit: int = 100) -> list[dict]:
         sql = [
             """
             SELECT id, user_id, question, status, human_reply, created_at, answered_at
@@ -449,7 +449,8 @@ class GameCSStore:
         if status:
             sql.append("WHERE status = ?")
             params.append(status)
-        sql.append("ORDER BY id ASC")
+        sql.append("ORDER BY created_at DESC LIMIT ?")
+        params.append(limit)
         with self._connect() as conn:
             rows = conn.execute(" ".join(sql), params).fetchall()
         return [dict(r) for r in rows]

@@ -27,9 +27,11 @@ class ContextBuilder:
         self,
         skill_names: list[str] | None = None,
         extra_system_prompt: str | None = None,
+        tool_schemas: list[dict[str, Any]] | None = None,
+        admin_mode: str | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
-        parts = [self._get_identity()]
+        parts = [self._get_identity(tool_schemas=tool_schemas, admin_mode=admin_mode)]
 
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
@@ -59,11 +61,32 @@ Skills with available="false" need dependencies installed first - you can try in
 
         return "\n\n---\n\n".join(parts)
 
-    def _get_identity(self) -> str:
+    def _get_identity(
+        self,
+        *,
+        tool_schemas: list[dict[str, Any]] | None = None,
+        admin_mode: str | None = None,
+    ) -> str:
         """Get the core identity section."""
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
+        tool_summary = self._format_tool_summary(tool_schemas)
+        tool_names = self._extract_tool_names(tool_schemas)
+        admin_note = ""
+        if admin_mode == "game_cs":
+            admin_note = (
+                "\n## Admin Routing\n"
+                "You are handling live game customer-service admin operations.\n"
+                "For customer lists, customer details, SOP state, customer messages, and human "
+                "handoff tickets, use the dedicated game_cs_* tools.\n"
+                "Do not inspect local sessions/, workspace files, or logs to answer live admin "
+                "queries unless the user explicitly asks for source-code or file inspection.\n"
+            )
+        wait_guidance = "For long waits, avoid rapid poll loops and prefer tools that can wait efficiently."
+        if "spawn" in tool_names:
+            wait_guidance += "\nIf a task is more complex or takes longer, spawn a sub-agent. Completion is push-based: it will auto-announce when done."
+            wait_guidance += "\nDo not poll `subagents list` / `sessions_list` in a loop; only check status on-demand (for intervention, debugging, or when explicitly asked)."
 
         return f"""
 You are a customer service agent running inside OpenClaw, responsible for answering customer inquiries, resolving issues, and providing support in a friendly and professional manner.
@@ -71,26 +94,15 @@ You are a customer service agent running inside OpenClaw, responsible for answer
 ## Tooling
 Tool availability (filtered by policy):
 Tool names are case-sensitive. Call tools exactly as listed.
-- exec: Run shell commands (pty available for TTY-required CLIs)
-- write_file: Read file contents
-- read_file: Create or overwrite files
-- edit_file: Make precise edits to files
-- process: Manage background exec sessions
-- web_search: Search the web (Brave API)
-- web_fetch: Fetch and extract readable content from a URL
-- spawn: Spawn a sub-agent session
-- cron: Schedule future tasks
-- message: Send messages and channel actions
+{tool_summary}
 TOOLS.md does not control tool availability; it is user guidance for how to use external tools.
-For long waits, avoid rapid poll loops: use exec with enough yieldMs or process(action=poll, timeout=<ms>).
-If a task is more complex or takes longer, spawn a sub-agent. Completion is push-based: it will auto-announce when done.
-Do not poll `subagents list` / `sessions_list` in a loop; only check status on-demand (for intervention, debugging, or when explicitly asked).
+{wait_guidance}
 ## Tool Call Style
 Default: do not narrate routine, low-risk tool calls (just call the tool).
 Narrate only when it helps: multi-step work, complex/challenging problems, sensitive actions (e.g., deletions), or when the user explicitly asks.
 Keep narration brief and value-dense; avoid repeating obvious steps.
 Use plain human language for narration unless in a technical context.
-
+{admin_note}
 
 ## Runtime
 {runtime}
@@ -106,6 +118,31 @@ Reminder: commit your changes in this workspace after edits.
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
 """
+
+    @staticmethod
+    def _format_tool_summary(tool_schemas: list[dict[str, Any]] | None) -> str:
+        if not tool_schemas:
+            return "- No external tools registered for this run."
+
+        lines = []
+        for tool in tool_schemas:
+            fn = (tool.get("function") or {}) if tool.get("type") == "function" else tool
+            name = fn.get("name")
+            if not name:
+                continue
+            description = (fn.get("description") or "").strip()
+            lines.append(f"- {name}: {description or 'No description provided.'}")
+        return "\n".join(lines) if lines else "- No external tools registered for this run."
+
+    @staticmethod
+    def _extract_tool_names(tool_schemas: list[dict[str, Any]] | None) -> set[str]:
+        names: set[str] = set()
+        for tool in tool_schemas or []:
+            fn = (tool.get("function") or {}) if tool.get("type") == "function" else tool
+            name = fn.get("name")
+            if name:
+                names.add(str(name))
+        return names
 
     @staticmethod
     def _build_runtime_context(channel: str | None, chat_id: str | None) -> str:
@@ -138,10 +175,20 @@ Reminder: commit your changes in this workspace after edits.
         channel: str | None = None,
         chat_id: str | None = None,
         extra_system_prompt: str | None = None,
+        tool_schemas: list[dict[str, Any]] | None = None,
+        admin_mode: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names, extra_system_prompt=extra_system_prompt)},
+            {
+                "role": "system",
+                "content": self.build_system_prompt(
+                    skill_names,
+                    extra_system_prompt=extra_system_prompt,
+                    tool_schemas=tool_schemas,
+                    admin_mode=admin_mode,
+                ),
+            },
             *history,
             {"role": "user", "content": self._build_runtime_context(channel, chat_id)},
             {"role": "user", "content": self._build_user_content(current_message, media)},

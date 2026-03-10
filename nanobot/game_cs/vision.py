@@ -77,7 +77,7 @@ async def extract_info_from_image(
     image_ext: str = "png",
     api_key: str | None = None,
     api_base: str = "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    model: str = "qwen3-vl-plus",
+    model: str = "qwen3-vl-plus-2025-12-19",
     timeout_s: float = 30.0,
 ) -> dict:
     if not api_key:

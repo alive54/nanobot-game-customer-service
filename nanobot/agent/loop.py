@@ -18,7 +18,7 @@ from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
-from nanobot.agent.tools.game_cs_admin import GameCSAdminTool
+from nanobot.agent.tools.game_cs_admin import build_game_cs_admin_tools
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
@@ -67,10 +67,12 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        admin_mode: str | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
         self.channels_config = channels_config
+        self.admin_mode = admin_mode
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
@@ -117,29 +119,45 @@ class AgentLoop:
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
         allowed_dir = self.workspace if self.restrict_to_workspace else None
-        for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
-        self.tools.register(ExecTool(
-            working_dir=str(self.workspace),
-            timeout=self.exec_config.timeout,
-            restrict_to_workspace=self.restrict_to_workspace,
-            path_append=self.exec_config.path_append,
-        ))
-        self.tools.register(WebSearchTool(api_key=self.brave_api_key, proxy=self.web_proxy))
-        self.tools.register(WebFetchTool(proxy=self.web_proxy))
+        if self.admin_mode != "game_cs":
+            for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
+                self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
+            self.tools.register(ExecTool(
+                working_dir=str(self.workspace),
+                timeout=self.exec_config.timeout,
+                restrict_to_workspace=self.restrict_to_workspace,
+                path_append=self.exec_config.path_append,
+            ))
+            self.tools.register(WebSearchTool(api_key=self.brave_api_key, proxy=self.web_proxy))
+            self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
-        self.tools.register(SpawnTool(manager=self.subagents))
+        if self.admin_mode != "game_cs":
+            self.tools.register(SpawnTool(manager=self.subagents))
         game_cs_admin_base_url = os.getenv("NANOBOT_GAME_CS_ADMIN_BASE_URL", "").strip()
         game_cs_admin_token = os.getenv("NANOBOT_GAME_CS_ADMIN_TOKEN", "").strip()
-        if game_cs_admin_base_url and game_cs_admin_token:
-            self.tools.register(
-                GameCSAdminTool(
-                    base_url=game_cs_admin_base_url,
-                    token=game_cs_admin_token,
-                )
+        if game_cs_admin_base_url and not game_cs_admin_token:
+            logger.warning(
+                "NANOBOT_GAME_CS_ADMIN_BASE_URL is set but NANOBOT_GAME_CS_ADMIN_TOKEN is missing; "
+                "game_cs admin tools are disabled"
             )
+        if game_cs_admin_token and not game_cs_admin_base_url:
+            logger.warning(
+                "NANOBOT_GAME_CS_ADMIN_TOKEN is set but NANOBOT_GAME_CS_ADMIN_BASE_URL is missing; "
+                "game_cs admin tools are disabled"
+            )
+        if game_cs_admin_base_url and game_cs_admin_token:
+            for tool in build_game_cs_admin_tools(
+                base_url=game_cs_admin_base_url,
+                token=game_cs_admin_token,
+            ):
+                self.tools.register(tool)
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+        logger.info(
+            "Agent tool profile: admin_mode={}, tools={}",
+            self.admin_mode or "default",
+            ", ".join(self.tools.tool_names),
+        )
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -169,6 +187,19 @@ class AgentLoop:
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+
+    def _combined_system_prompt(self, extra_system_prompt: str | None = None) -> str | None:
+        prompts: list[str] = []
+        if self.admin_mode == "game_cs":
+            prompts.append(
+                "When acting as the game_cs admin assistant, prefer the dedicated game_cs_* tools "
+                "for live customer lists, customer detail lookups, SOP states, proactive replies, "
+                "and human handoff tickets. Do not use filesystem tools or session files as a "
+                "substitute for live admin API data."
+            )
+        if extra_system_prompt:
+            prompts.append(extra_system_prompt)
+        return "\n\n".join(prompts) if prompts else None
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -358,7 +389,9 @@ class AgentLoop:
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
-                extra_system_prompt=extra_system_prompt,
+                extra_system_prompt=self._combined_system_prompt(extra_system_prompt),
+                tool_schemas=self.tools.get_definitions(),
+                admin_mode=self.admin_mode,
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
@@ -434,7 +467,9 @@ class AgentLoop:
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
-            extra_system_prompt=extra_system_prompt,
+            extra_system_prompt=self._combined_system_prompt(extra_system_prompt),
+            tool_schemas=self.tools.get_definitions(),
+            admin_mode=self.admin_mode,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:

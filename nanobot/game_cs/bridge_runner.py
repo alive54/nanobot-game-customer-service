@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 
 import uvicorn
 
@@ -20,6 +21,24 @@ from nanobot.game_cs.service import create_app
 
 def _build_channel(channel_name: str, bus: MessageBus):
     cfg = load_config()
+    if channel_name == "mowebchat":
+        from nanobot.channels.mowebchat import MowebchatChannel
+
+        channel_cfg = cfg.channels.mowebchat.model_copy(
+            update={
+                "base_url": os.getenv("MOWEBCHAT_BASE_URL", cfg.channels.mowebchat.base_url),
+                "pull_wait_ms": int(
+                    os.getenv("MOWEBCHAT_PULL_WAIT_MS", str(cfg.channels.mowebchat.pull_wait_ms))
+                ),
+                "timeout_s": float(
+                    os.getenv("MOWEBCHAT_TIMEOUT_S", str(cfg.channels.mowebchat.timeout_s))
+                ),
+            }
+        )
+        return MowebchatChannel(
+            channel_cfg,
+            bus,
+        )
     if channel_name == "mochat":
         from nanobot.channels.mochat import MochatChannel
 
@@ -49,7 +68,9 @@ async def _run(channel_name: str, host: str, port: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--channel", default="mochat", help="Channel name: mochat | dingtalk")
+    parser.add_argument(
+        "--channel", default="mochat", help="Channel name: mowebchat | mochat | dingtalk"
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8011)
     args = parser.parse_args()

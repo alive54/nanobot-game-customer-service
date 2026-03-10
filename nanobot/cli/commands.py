@@ -360,6 +360,18 @@ def gateway(
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
+    game_cs_admin_base_url = os.getenv("NANOBOT_GAME_CS_ADMIN_BASE_URL", "").strip()
+    game_cs_admin_token = os.getenv("NANOBOT_GAME_CS_ADMIN_TOKEN", "").strip()
+    game_cs_admin_mode = "game_cs" if (game_cs_admin_base_url and game_cs_admin_token) else None
+    if game_cs_admin_mode == "game_cs":
+        console.print(
+            f"[green]game_cs admin mode enabled[/green] ({game_cs_admin_base_url})"
+        )
+    else:
+        console.print(
+            "[yellow]game_cs admin mode disabled[/yellow]: "
+            "missing NANOBOT_GAME_CS_ADMIN_BASE_URL or NANOBOT_GAME_CS_ADMIN_TOKEN"
+        )
 
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
@@ -384,6 +396,7 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        admin_mode=game_cs_admin_mode,
     )
 
     # Set cron callback (needs agent)

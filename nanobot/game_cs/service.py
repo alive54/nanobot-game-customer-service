@@ -1423,11 +1423,12 @@ def create_app(
     @app.get("/admin/human-queries", tags=["admin"])
     def admin_human_queries(
         status: str | None = None,
+        limit: int = 100,
         x_game_cs_token: str | None = Header(default=None),
     ) -> dict[str, Any]:
         if x_game_cs_token != _cfg_box[0].service_token:
             raise HTTPException(status_code=401, detail="invalid token")
-        items = store.list_human_queries(status=status)
+        items = store.list_human_queries(status=status, limit=limit)
         return {"ok": True, "count": len(items), "queries": items}
 
     @app.post("/webhook/game-message", tags=["webhook"])
