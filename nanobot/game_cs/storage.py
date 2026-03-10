@@ -438,7 +438,7 @@ class GameCSStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def list_human_queries(self, status: str | None = None, limit: int = 100) -> list[dict]:
+    def list_human_queries(self, status: str | None = None, limit: int = 20) -> list[dict]:
         sql = [
             """
             SELECT id, user_id, question, status, human_reply, created_at, answered_at
@@ -458,7 +458,7 @@ class GameCSStore:
     def list_sessions(
         self,
         *,
-        limit: int = 100,
+        limit: int = 20,
         include_closed: bool = True,
         sop_state: str | None = None,
         query: str | None = None,

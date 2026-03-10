@@ -2,6 +2,7 @@ import asyncio
 
 from nanobot.agent.tools.game_cs_admin import (
     GameCSAdminTool,
+    GameCSGetCustomerTool,
     GameCSListCustomersTool,
     build_game_cs_admin_tools,
 )
@@ -98,3 +99,26 @@ def test_build_game_cs_admin_tools_exposes_dedicated_tool_names():
         "game_cs_list_human_queries",
         "game_cs_human_reply",
     ]
+
+
+def test_game_cs_get_customer_tool_limits_messages_and_queries(monkeypatch):
+    requests = []
+
+    def _factory(*args, **kwargs):
+        kwargs["requests_sink"] = requests
+        return _DummyClient(*args, **kwargs)
+
+    monkeypatch.setattr("nanobot.agent.tools.game_cs_admin.httpx.AsyncClient", _factory)
+    tool = GameCSGetCustomerTool(base_url="http://127.0.0.1:8011", token="secret")
+
+    result = asyncio.run(
+        tool.execute(user_id="u1", message_limit=20, human_query_limit=20)
+    )
+
+    assert '"ok": true' in result
+    assert requests[0]["method"] == "GET"
+    assert requests[0]["url"] == "http://127.0.0.1:8011/admin/customer/u1"
+    assert requests[0]["params"] == {
+        "message_limit": 20,
+        "human_query_limit": 20,
+    }

@@ -7,6 +7,7 @@ import json
 import os
 import re
 import weakref
+from datetime import datetime
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -57,7 +58,7 @@ class AgentLoop:
         max_iterations: int = 40,
         temperature: float = 0.1,
         max_tokens: int = 4096,
-        memory_window: int = 100,
+        memory_window: int = 10,
         reasoning_effort: str | None = None,
         brave_api_key: str | None = None,
         web_proxy: str | None = None,
@@ -119,7 +120,7 @@ class AgentLoop:
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
         allowed_dir = self.workspace if self.restrict_to_workspace else None
-        if self.admin_mode != "game_cs":
+        if self.admin_mode == "admin_game_cs":
             for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
                 self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
             self.tools.register(ExecTool(
@@ -131,7 +132,7 @@ class AgentLoop:
             self.tools.register(WebSearchTool(api_key=self.brave_api_key, proxy=self.web_proxy))
             self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
-        if self.admin_mode != "game_cs":
+        if self.admin_mode == "admin_game_cs":
             self.tools.register(SpawnTool(manager=self.subagents))
         game_cs_admin_base_url = os.getenv("NANOBOT_GAME_CS_ADMIN_BASE_URL", "").strip()
         game_cs_admin_token = os.getenv("NANOBOT_GAME_CS_ADMIN_TOKEN", "").strip()
@@ -393,6 +394,7 @@ class AgentLoop:
                 tool_schemas=self.tools.get_definitions(),
                 admin_mode=self.admin_mode,
             )
+
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
@@ -471,6 +473,15 @@ class AgentLoop:
             tool_schemas=self.tools.get_definitions(),
             admin_mode=self.admin_mode,
         )
+
+        # Debug: save messages to file with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        debug_dir = Path("debug_messages")
+        debug_dir.mkdir(exist_ok=True)
+        debug_file = debug_dir / f"messages_{timestamp}.json"
+        with open(debug_file, "w", encoding="utf-8") as f:
+            json.dump(initial_messages, f, ensure_ascii=False, indent=2)
+        logger.debug(f"Saved messages to {debug_file}")
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})

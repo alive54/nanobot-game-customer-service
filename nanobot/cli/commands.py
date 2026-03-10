@@ -362,8 +362,8 @@ def gateway(
     session_manager = SessionManager(config.workspace_path)
     game_cs_admin_base_url = os.getenv("NANOBOT_GAME_CS_ADMIN_BASE_URL", "").strip()
     game_cs_admin_token = os.getenv("NANOBOT_GAME_CS_ADMIN_TOKEN", "").strip()
-    game_cs_admin_mode = "game_cs" if (game_cs_admin_base_url and game_cs_admin_token) else None
-    if game_cs_admin_mode == "game_cs":
+    game_cs_admin_mode = "admin_game_cs" if (game_cs_admin_base_url and game_cs_admin_token) else None
+    if game_cs_admin_mode == "admin_game_cs":
         console.print(
             f"[green]game_cs admin mode enabled[/green] ({game_cs_admin_base_url})"
         )

@@ -1340,7 +1340,7 @@ def create_app(
 
     @app.get("/admin/customers", tags=["admin"])
     def list_customers(
-        limit: int = 100,
+        limit: int = 20,
         include_closed: bool = True,
         sop_state: str | None = None,
         query: str | None = None,
@@ -1364,6 +1364,7 @@ def create_app(
     def get_customer_detail(
         user_id: str,
         message_limit: int = 20,
+        human_query_limit: int = 20,
         x_game_cs_token: str | None = Header(default=None),
     ) -> dict[str, Any]:
         if x_game_cs_token != _cfg_box[0].service_token:
@@ -1372,11 +1373,11 @@ def create_app(
         session = store.get_or_create_session(user_id, default_game_name=_cfg_box[0].default_game_name)
         human_queries = [
             item for item in store.get_pending_queries_all() if str(item.get("user_id")) == user_id
-        ]
+        ][: max(1, min(human_query_limit, 50))]
         return {
             "ok": True,
             "customer": _session_to_dict(session),
-            "recent_messages": store.get_session_messages(user_id, limit=max(1, min(message_limit, 100))),
+            "recent_messages": store.get_session_messages(user_id, limit=max(1, min(message_limit, 50))),
             "human_queries": human_queries,
         }
 
@@ -1423,7 +1424,7 @@ def create_app(
     @app.get("/admin/human-queries", tags=["admin"])
     def admin_human_queries(
         status: str | None = None,
-        limit: int = 100,
+        limit: int = 20,
         x_game_cs_token: str | None = Header(default=None),
     ) -> dict[str, Any]:
         if x_game_cs_token != _cfg_box[0].service_token:

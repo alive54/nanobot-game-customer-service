@@ -316,22 +316,11 @@ def build_runtime(workspace_path=None, timeout_ms: int = 5000) -> "GameCSAIRunti
             mcp_servers={},
             channels_config=None,
         )
-        # 能力禁用
-        for name in (
-            "exec",
-            "write_file",
-            "read_file",
-            "edit_file",
-            "spawn",
-            "web_search",
-            "web_fetch",
-            "message",
-            "cron",
-        ):
-            try:
-                agent.tools._tools.pop(name, None)
-            except Exception:
-                pass
+        # 禁用所有工具
+        try:
+            agent.tools._tools.clear()
+        except Exception:
+            pass
         runtime = GameCSAIRuntime(agent=agent, timeout_ms=timeout_ms)
         try:
             from .vision import set_runtime_loop

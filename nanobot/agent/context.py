@@ -3,6 +3,7 @@
 import base64
 import mimetypes
 import platform
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -38,23 +39,22 @@ class ContextBuilder:
             parts.append(bootstrap)
 
         memory = self.memory.get_memory_context()
-        if memory:
-            parts.append(f"# Memory\n\n{memory}")
+        if memory and admin_mode == "admin_game_cs":
+            parts.append(f"# Memory\n\n{self._compact_text(memory)}")
 
         always_skills = self.skills.get_always_skills()
-        if always_skills:
+        if always_skills and admin_mode == "admin_game_cs":
             always_content = self.skills.load_skills_for_context(always_skills)
             if always_content:
-                parts.append(f"# Active Skills\n\n{always_content}")
+                parts.append(f"# Active Skills\n\n{self._compact_text(always_content)}")
 
         skills_summary = self.skills.build_skills_summary()
-        if skills_summary:
-            parts.append(f"""# Skills
-
-The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
-Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
-
-{skills_summary}""")
+        if skills_summary and admin_mode == "admin_game_cs":
+            parts.append(
+                "# Skills\n\n"
+                "Read a skill file only when needed. Unavailable skills list missing requirements.\n\n"
+                f"{skills_summary}"
+            )
 
         if extra_system_prompt:
             parts.append(extra_system_prompt)
@@ -68,13 +68,18 @@ Skills with available="false" need dependencies installed first - you can try in
         admin_mode: str | None = None,
     ) -> str:
         """Get the core identity section."""
+        if admin_mode != "admin_game_cs":
+            return f"""
+You are a customer service agent running inside OpenClaw, responsible for answering customer inquiries, resolving issues, and providing support in a friendly and professional manner.
+"""
+        
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
         tool_summary = self._format_tool_summary(tool_schemas)
         tool_names = self._extract_tool_names(tool_schemas)
         admin_note = ""
-        if admin_mode == "game_cs":
+        if admin_mode == "admin_game_cs":
             admin_note = (
                 "\n## Admin Routing\n"
                 "You are handling live game customer-service admin operations.\n"
@@ -122,17 +127,16 @@ Reminder: commit your changes in this workspace after edits.
     @staticmethod
     def _format_tool_summary(tool_schemas: list[dict[str, Any]] | None) -> str:
         if not tool_schemas:
-            return "- No external tools registered for this run."
+            return "Available tools: none."
 
-        lines = []
+        names: list[str] = []
         for tool in tool_schemas:
             fn = (tool.get("function") or {}) if tool.get("type") == "function" else tool
             name = fn.get("name")
             if not name:
                 continue
-            description = (fn.get("description") or "").strip()
-            lines.append(f"- {name}: {description or 'No description provided.'}")
-        return "\n".join(lines) if lines else "- No external tools registered for this run."
+            names.append(str(name))
+        return "Available tools: " + ", ".join(names) if names else "Available tools: none."
 
     @staticmethod
     def _extract_tool_names(tool_schemas: list[dict[str, Any]] | None) -> set[str]:
@@ -161,10 +165,17 @@ Reminder: commit your changes in this workspace after edits.
         for filename in self.BOOTSTRAP_FILES:
             file_path = self.workspace / filename
             if file_path.exists():
-                content = file_path.read_text(encoding="utf-8")
+                content = self._compact_text(file_path.read_text(encoding="utf-8"))
                 parts.append(f"## {filename}\n\n{content}")
 
         return "\n\n".join(parts) if parts else ""
+
+    @staticmethod
+    def _compact_text(content: str) -> str:
+        """Trim avoidable prompt bloat without changing semantics."""
+        content = content.strip()
+        content = re.sub(r"\n{3,}", "\n\n", content)
+        return content
 
     def build_messages(
         self,

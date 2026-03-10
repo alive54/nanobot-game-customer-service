@@ -163,3 +163,36 @@ def test_admin_human_queries_and_reply(tmp_path: Path) -> None:
     delivered = client.get("/admin/customer/u200", headers=headers)
     assert delivered.status_code == 200
     assert delivered.json()["human_queries"][0]["status"] in {"answered", "delivered"}
+
+
+def test_admin_api_limits_default_list_sizes(tmp_path: Path) -> None:
+    cfg = _make_cfg(tmp_path / "game_cs.db")
+
+    with patch("nanobot.game_cs.service.OpenVikingKB", _DummyKB):
+        client = TestClient(create_app(config=cfg))
+
+    headers = {"X-Game-Cs-Token": cfg.service_token}
+    for i in range(25):
+        response = client.post(
+            "/webhook/game-message",
+            headers=headers,
+            json={"user_id": f"u{i:03d}", "message": "hello", "metadata": {}},
+        )
+        assert response.status_code == 200
+
+    customers = client.get("/admin/customers", headers=headers)
+    assert customers.status_code == 200
+    assert customers.json()["count"] == 20
+
+    target = "u000"
+    for i in range(25):
+        response = client.post(
+            "/webhook/game-message",
+            headers=headers,
+            json={"user_id": target, "message": f"follow-up {i}", "metadata": {}},
+        )
+        assert response.status_code == 200
+
+    detail = client.get(f"/admin/customer/{target}", headers=headers)
+    assert detail.status_code == 200
+    assert len(detail.json()["recent_messages"]) == 20

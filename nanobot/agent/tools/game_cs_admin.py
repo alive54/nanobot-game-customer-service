@@ -66,6 +66,9 @@ class GameCSStatsTool(_GameCSAdminHTTPTool):
 
 
 class GameCSListCustomersTool(_GameCSAdminHTTPTool):
+    DEFAULT_LIMIT = 20
+    MAX_LIMIT = 50
+
     @property
     def name(self) -> str:
         return "game_cs_list_customers"
@@ -86,7 +89,7 @@ class GameCSListCustomersTool(_GameCSAdminHTTPTool):
                 "limit": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": 500,
+                    "maximum": self.MAX_LIMIT,
                     "description": "Maximum number of customers to list.",
                 },
                 "include_closed": {
@@ -106,7 +109,7 @@ class GameCSListCustomersTool(_GameCSAdminHTTPTool):
 
     async def execute(
         self,
-        limit: int = 100,
+        limit: int = DEFAULT_LIMIT,
         include_closed: bool = True,
         sop_state: str | None = None,
         query: str | None = None,
@@ -125,6 +128,11 @@ class GameCSListCustomersTool(_GameCSAdminHTTPTool):
 
 
 class GameCSGetCustomerTool(_GameCSAdminHTTPTool):
+    DEFAULT_MESSAGE_LIMIT = 20
+    DEFAULT_HUMAN_QUERY_LIMIT = 20
+    MAX_MESSAGE_LIMIT = 50
+    MAX_HUMAN_QUERY_LIMIT = 50
+
     @property
     def name(self) -> str:
         return "game_cs_get_customer"
@@ -145,18 +153,33 @@ class GameCSGetCustomerTool(_GameCSAdminHTTPTool):
                 "message_limit": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": 100,
+                    "maximum": self.MAX_MESSAGE_LIMIT,
                     "description": "How many recent messages to include.",
+                },
+                "human_query_limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": self.MAX_HUMAN_QUERY_LIMIT,
+                    "description": "How many recent human handoff tickets to include.",
                 },
             },
             "required": ["user_id"],
         }
 
-    async def execute(self, user_id: str, message_limit: int = 20, **_: Any) -> str:
+    async def execute(
+        self,
+        user_id: str,
+        message_limit: int = DEFAULT_MESSAGE_LIMIT,
+        human_query_limit: int = DEFAULT_HUMAN_QUERY_LIMIT,
+        **_: Any,
+    ) -> str:
         return await self._request(
             "GET",
             f"/admin/customer/{user_id}",
-            params={"message_limit": message_limit},
+            params={
+                "message_limit": message_limit,
+                "human_query_limit": human_query_limit,
+            },
         )
 
 
@@ -281,6 +304,9 @@ class GameCSReopenCustomerTool(_GameCSAdminHTTPTool):
 
 
 class GameCSListHumanQueriesTool(_GameCSAdminHTTPTool):
+    DEFAULT_LIMIT = 20
+    MAX_LIMIT = 50
+
     @property
     def name(self) -> str:
         return "game_cs_list_human_queries"
@@ -301,13 +327,13 @@ class GameCSListHumanQueriesTool(_GameCSAdminHTTPTool):
                 "limit": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": 500,
+                    "maximum": self.MAX_LIMIT,
                     "description": "Maximum number of tickets to list.",
                 },
             },
         }
 
-    async def execute(self, status: str | None = None, limit: int = 100, **_: Any) -> str:
+    async def execute(self, status: str | None = None, limit: int = DEFAULT_LIMIT, **_: Any) -> str:
         return await self._request(
             "GET",
             "/admin/human-queries",
@@ -394,7 +420,8 @@ class GameCSAdminTool(_GameCSAdminHTTPTool):
                 "include_closed": {"type": "boolean"},
                 "sop_state": {"type": "string"},
                 "query": {"type": "string"},
-                "message_limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                "message_limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                "human_query_limit": {"type": "integer", "minimum": 1, "maximum": 50},
                 "status": {"type": "string"},
             },
             "required": ["action"],
@@ -406,11 +433,12 @@ class GameCSAdminTool(_GameCSAdminHTTPTool):
         user_id: str | None = None,
         reply: str | None = None,
         query_id: int | None = None,
-        limit: int = 100,
+        limit: int = 20,
         include_closed: bool = True,
         sop_state: str | None = None,
         query: str | None = None,
         message_limit: int = 20,
+        human_query_limit: int = 20,
         status: str | None = None,
         **_: Any,
     ) -> str:
@@ -429,6 +457,7 @@ class GameCSAdminTool(_GameCSAdminHTTPTool):
             return await GameCSGetCustomerTool(self.base_url, self.token, self.timeout_s).execute(
                 user_id=user_id,
                 message_limit=message_limit,
+                human_query_limit=human_query_limit,
             )
         if action == "send_message":
             if not user_id or not reply:
