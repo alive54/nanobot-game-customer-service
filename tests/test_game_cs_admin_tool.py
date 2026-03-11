@@ -2,6 +2,7 @@ import asyncio
 
 from nanobot.agent.tools.game_cs_admin import (
     GameCSAdminTool,
+    GameCSAddKBQATool,
     GameCSGetCustomerTool,
     GameCSListCustomersTool,
     build_game_cs_admin_tools,
@@ -98,6 +99,7 @@ def test_build_game_cs_admin_tools_exposes_dedicated_tool_names():
         "game_cs_reopen_customer",
         "game_cs_list_human_queries",
         "game_cs_human_reply",
+        "game_cs_add_kb_qa",
     ]
 
 
@@ -122,3 +124,55 @@ def test_game_cs_get_customer_tool_limits_messages_and_queries(monkeypatch):
         "message_limit": 20,
         "human_query_limit": 20,
     }
+
+
+def test_game_cs_add_kb_qa_tool_routes_request(monkeypatch):
+    requests = []
+
+    def _factory(*args, **kwargs):
+        kwargs["requests_sink"] = requests
+        return _DummyClient(*args, **kwargs)
+
+    monkeypatch.setattr("nanobot.agent.tools.game_cs_admin.httpx.AsyncClient", _factory)
+    tool = GameCSAddKBQATool(base_url="http://127.0.0.1:8011", token="secret")
+
+    result = asyncio.run(
+        tool.execute(
+            question="这个游戏有什么职业",
+            answer="有法师、战士、牧师、魔法师",
+            category="faq",
+        )
+    )
+
+    assert '"ok": true' in result
+    assert requests[0]["method"] == "POST"
+    assert requests[0]["url"] == "http://127.0.0.1:8011/kb/qa"
+    assert requests[0]["json"] == {
+        "question": "这个游戏有什么职业",
+        "answer": "有法师、战士、牧师、魔法师",
+        "category": "faq",
+    }
+
+
+def test_game_cs_admin_tool_routes_add_kb_qa(monkeypatch):
+    requests = []
+
+    def _factory(*args, **kwargs):
+        kwargs["requests_sink"] = requests
+        return _DummyClient(*args, **kwargs)
+
+    monkeypatch.setattr("nanobot.agent.tools.game_cs_admin.httpx.AsyncClient", _factory)
+    tool = GameCSAdminTool(base_url="http://127.0.0.1:8011", token="secret")
+
+    result = asyncio.run(
+        tool.execute(
+            action="add_kb_qa",
+            question="这个游戏有什么职业",
+            answer="有法师、战士、牧师、魔法师",
+            category="faq",
+        )
+    )
+
+    assert '"ok": true' in result
+    assert requests[0]["method"] == "POST"
+    assert requests[0]["url"] == "http://127.0.0.1:8011/kb/qa"

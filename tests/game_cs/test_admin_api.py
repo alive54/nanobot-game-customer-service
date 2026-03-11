@@ -16,6 +16,13 @@ class _DummyKB:
     def add_resources(self, paths, wait=True):
         return list(paths)
 
+    def add_qa(self, question, answer, *, category="faq", wait=True):
+        return {
+            "file_path": f"/tmp/{category}/{question}.md",
+            "root_uri": f"viking://test/{category}/{question}.md",
+            "category": category,
+        }
+
     def commit_session(self, *args, **kwargs):
         return None
 
@@ -83,6 +90,8 @@ def test_admin_stats_and_customer_lifecycle(tmp_path: Path) -> None:
     summary = stats.json()["summary"]
     assert summary["total_customers"] == 1
     assert summary["open_customers"] == 1
+    assert summary["ai_auto_reply_enabled_customers"] == 1
+    assert summary["ai_auto_reply_disabled_customers"] == 0
     assert "collecting_info" in summary["sop_state_counts"]
 
     customers = client.get("/admin/customers", headers=headers)
@@ -110,6 +119,8 @@ def test_admin_stats_and_customer_lifecycle(tmp_path: Path) -> None:
     )
     assert close.status_code == 200
     assert close.json()["customer"]["is_closed"] is True
+    assert close.json()["customer"]["ai_auto_reply_enabled"] is False
+    assert close.json()["message"] == "AI auto reply disabled"
 
     reopen = client.post(
         "/admin/customer/u100/close",
@@ -118,6 +129,8 @@ def test_admin_stats_and_customer_lifecycle(tmp_path: Path) -> None:
     )
     assert reopen.status_code == 200
     assert reopen.json()["customer"]["is_closed"] is False
+    assert reopen.json()["customer"]["ai_auto_reply_enabled"] is True
+    assert reopen.json()["message"] == "AI auto reply enabled"
 
     reset = client.post("/admin/customer/u100/reset", headers=headers)
     assert reset.status_code == 200
@@ -196,3 +209,88 @@ def test_admin_api_limits_default_list_sizes(tmp_path: Path) -> None:
     detail = client.get(f"/admin/customer/{target}", headers=headers)
     assert detail.status_code == 200
     assert len(detail.json()["recent_messages"]) == 20
+
+
+def test_closed_customer_disables_ai_auto_reply_and_creates_human_query(tmp_path: Path) -> None:
+    cfg = _make_cfg(tmp_path / "game_cs.db")
+
+    with patch("nanobot.game_cs.service.OpenVikingKB", _DummyKB):
+        client = TestClient(create_app(config=cfg))
+
+    headers = {"X-Game-Cs-Token": cfg.service_token}
+    close = client.post(
+        "/admin/customer/u300/close",
+        headers=headers,
+        json={"closed": True},
+    )
+    assert close.status_code == 200
+
+    with patch("nanobot.game_cs.service.forward_to_admin", AsyncMock(return_value=True)):
+        response = client.post(
+            "/webhook/game-message",
+            headers=headers,
+            json={"user_id": "u300", "message": "我还是登不上去", "metadata": {}},
+        )
+
+    assert response.status_code == 204
+
+    detail = client.get("/admin/customer/u300", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["customer"]["is_closed"] is True
+    assert detail.json()["customer"]["ai_auto_reply_enabled"] is False
+    assert detail.json()["recent_messages"][-1]["content"] == "我还是登不上去"
+
+    queries = client.get("/admin/human-queries", headers=headers)
+    assert queries.status_code == 200
+    assert queries.json()["count"] >= 1
+    assert queries.json()["queries"][0]["user_id"] == "u300"
+
+
+def test_kb_qa_adds_manual_entry(tmp_path: Path) -> None:
+    cfg = _make_cfg(tmp_path / "game_cs.db")
+
+    with patch("nanobot.game_cs.service.OpenVikingKB", _DummyKB):
+        client = TestClient(create_app(config=cfg))
+
+    headers = {"X-Game-Cs-Token": cfg.service_token}
+    response = client.post(
+        "/kb/qa",
+        headers=headers,
+        json={
+            "question": "这个游戏有什么职业",
+            "answer": "有法师、战士、牧师、魔法师",
+            "category": "faq",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["question"] == "这个游戏有什么职业"
+    assert payload["category"] == "faq"
+    assert payload["root_uri"] == "viking://test/faq/这个游戏有什么职业.md"
+
+
+def test_kb_qa_rejects_empty_question_and_answer(tmp_path: Path) -> None:
+    cfg = _make_cfg(tmp_path / "game_cs.db")
+
+    with patch("nanobot.game_cs.service.OpenVikingKB", _DummyKB):
+        client = TestClient(create_app(config=cfg))
+
+    headers = {"X-Game-Cs-Token": cfg.service_token}
+
+    empty_question = client.post(
+        "/kb/qa",
+        headers=headers,
+        json={"question": "   ", "answer": "有效答案", "category": "faq"},
+    )
+    assert empty_question.status_code == 400
+    assert empty_question.json()["detail"] == "question cannot be empty"
+
+    empty_answer = client.post(
+        "/kb/qa",
+        headers=headers,
+        json={"question": "有效问题", "answer": "   ", "category": "faq"},
+    )
+    assert empty_answer.status_code == 400
+    assert empty_answer.json()["detail"] == "answer cannot be empty"

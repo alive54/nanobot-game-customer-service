@@ -34,6 +34,7 @@ try:
 except Exception:  # pragma: no cover - optional
     GameCSChannelBridge = None  # type: ignore[misc,assignment]
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 SAFE_USER_ID = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
@@ -121,6 +122,12 @@ class AdminCloseSessionIn(BaseModel):
     closed: bool = True
 
 
+class KBQAIn(BaseModel):
+    question: str
+    answer: str
+    category: str = "faq"
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -137,6 +144,13 @@ def _safe_user_id(user_id: str) -> str:
     if not SAFE_USER_ID.fullmatch(user_id):
         raise HTTPException(status_code=400, detail="invalid user_id")
     return user_id
+
+
+def _require_non_empty_text(value: str, field_name: str) -> str:
+    cleaned = value.strip()
+    if not cleaned:
+        raise HTTPException(status_code=400, detail=f"{field_name} cannot be empty")
+    return cleaned
 
 
 def _resolve_ext(ext: str) -> str:
@@ -170,6 +184,10 @@ def _codes_dict(cfg: GameCSConfig) -> dict[str, str]:
         "universal": cfg.code_universal,
         "guild": cfg.code_guild,
     }
+
+
+def _is_ai_auto_reply_enabled(session: SOPSessionState) -> bool:
+    return not session.is_closed
 
 
 def _extract_area_name(text: str) -> str | None:
@@ -392,8 +410,6 @@ def _handle_message(
 
     store.append_message(user_id, "user", user_text or "<no text>")
     session = store.get_or_create_session(user_id, default_game_name=cfg.default_game_name)
-    if session.is_closed:
-        session = store.reopen_session(user_id, default_game_name=cfg.default_game_name)
 
     screenshot_path = _persist_screenshot(cfg, payload)
     if screenshot_path:
@@ -410,6 +426,41 @@ def _handle_message(
             channel_chat_id=chat_id,
             default_game_name=cfg.default_game_name,
         )
+
+    session = store.get_or_create_session(user_id, default_game_name=cfg.default_game_name)
+    if session.is_closed:
+        question = user_text or "用户发送了一条新消息，请人工处理。"
+        query_id = store.create_human_query(user_id, question)
+        if cfg.admin_gateway_enabled and cfg.admin_gateway_url:
+            if background_tasks is not None:
+                background_tasks.add_task(
+                    forward_to_admin,
+                    query_id,
+                    user_id,
+                    question,
+                    cfg.admin_gateway_url,
+                    cfg.admin_gateway_token,
+                    10.0,
+                )
+            else:
+
+                def _forward_runner() -> None:
+                    try:
+                        asyncio.run(
+                            forward_to_admin(
+                                query_id,
+                                user_id,
+                                question,
+                                cfg.admin_gateway_url,
+                                cfg.admin_gateway_token,
+                                10.0,
+                            )
+                        )
+                    except Exception:
+                        logger.exception("forward_to_admin background thread failed")
+
+                threading.Thread(target=_forward_runner, daemon=True).start()
+        return None
 
     def _reply(
         text: str,
@@ -1080,6 +1131,7 @@ def _session_to_dict(session) -> dict[str, Any]:
         "is_bound": session.is_bound,
         "is_closed": session.is_closed,
         "closed_at": session.closed_at,
+        "ai_auto_reply_enabled": _is_ai_auto_reply_enabled(session),
         "codes_sent_at": session.codes_sent_at,
         "follow_up_30m_sent": session.follow_up_30m_sent,
         "follow_up_1h_sent": session.follow_up_1h_sent,
@@ -1097,8 +1149,6 @@ async def _admin_send_message(
     channel_bridge: GameCSChannelBridge | None,
 ) -> dict[str, Any]:
     session = store.get_or_create_session(user_id, default_game_name=cfg.default_game_name)
-    if session.is_closed:
-        session = store.reopen_session(user_id, default_game_name=cfg.default_game_name)
     store.append_message(user_id, "assistant", reply)
     delivered = await _push_outbound(user_id, reply, store, channel_bridge)
     refreshed = store.get_or_create_session(user_id, default_game_name=cfg.default_game_name)
@@ -1277,6 +1327,37 @@ def create_app(
         except Exception as exc:
             return {"ok": False, "error": str(exc), "indexed": []}
 
+    @app.post("/kb/qa", tags=["kb"])
+    def add_kb_qa(
+        payload: KBQAIn,
+        x_game_cs_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        if x_game_cs_token != _cfg_box[0].service_token:
+            raise HTTPException(status_code=401, detail="invalid token")
+
+        question = _require_non_empty_text(payload.question, "question")
+        answer = _require_non_empty_text(payload.answer, "answer")
+        category = payload.category.strip() or "faq"
+
+        try:
+            result = kb.add_qa(
+                question=question,
+                answer=answer,
+                category=category,
+                wait=True,
+            )
+
+            logger.info(f"result of adding kb qa: {result}")
+            return {
+                "ok": True,
+                "question": question,
+                "category": result["category"],
+                "file_path": result["file_path"],
+                "root_uri": result["root_uri"],
+            }
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"kb qa index failed: {exc}") from exc
+
     @app.post("/admin/update-codes", tags=["admin"])
     def update_codes(
         daily_checkin: str,
@@ -1419,7 +1500,11 @@ def create_app(
             state = store.close_session(user_id, default_game_name=_cfg_box[0].default_game_name)
         else:
             state = store.reopen_session(user_id, default_game_name=_cfg_box[0].default_game_name)
-        return {"ok": True, "customer": _session_to_dict(state)}
+        return {
+            "ok": True,
+            "customer": _session_to_dict(state),
+            "message": "AI auto reply disabled" if payload.closed else "AI auto reply enabled",
+        }
 
     @app.get("/admin/human-queries", tags=["admin"])
     def admin_human_queries(

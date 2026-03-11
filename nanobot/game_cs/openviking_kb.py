@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
+import re
 from pathlib import Path
 from typing import Any, Iterable
 
 import openviking as ov
 from openviking.message import TextPart
+
+logger = logging.getLogger(__name__)
 
 
 class OpenVikingKB:
@@ -24,6 +28,7 @@ class OpenVikingKB:
         self._client: ov.OpenViking | None = None
         self._initialized = False
         self._error: str | None = None
+        self._qa_dir = data_path.parent / "kb_qa"
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -70,6 +75,21 @@ class OpenVikingKB:
             return True
         except Exception:
             return False
+
+    @staticmethod
+    def _slugify(value: str, fallback: str = "qa") -> str:
+        normalized = re.sub(r"\s+", "-", value.strip().lower())
+        normalized = re.sub(r"[^0-9a-z\u4e00-\u9fff_-]", "-", normalized)
+        normalized = re.sub(r"-{2,}", "-", normalized).strip("-_")
+        return normalized[:80] or fallback
+
+    @staticmethod
+    def _build_qa_markdown(question: str, answer: str) -> str:
+        return (
+            f"# {question.strip()}\n\n"
+            f"问题：{question.strip()}\n\n"
+            f"答案：{answer.strip()}\n"
+        )
 
     @staticmethod
     def _normalize_text(value: Any) -> str:
@@ -239,6 +259,49 @@ class OpenVikingKB:
             except Exception:
                 pass
         return roots
+
+    def add_qa(
+        self,
+        question: str,
+        answer: str,
+        *,
+        category: str = "faq",
+        wait: bool = True,
+    ) -> dict[str, str]:
+        """
+        Persist one manual Q/A as Markdown and index it into OpenViking.
+
+        Returns a small payload describing the generated file and indexed URI.
+        """
+        client = self._client_or_raise()
+        safe_category = self._slugify(category, fallback="faq")
+        safe_name = self._slugify(question, fallback="qa")
+        category_dir = self._qa_dir / safe_category
+        category_dir.mkdir(parents=True, exist_ok=True)
+        file_path = category_dir / f"{safe_name}.md"
+        file_path.write_text(
+            self._build_qa_markdown(question, answer),
+            encoding="utf-8",
+        )
+        
+        result = client.add_resource(
+            path=str(file_path),
+            target=self._target_uri,
+            reason="Game customer-service managed QA entry",
+            wait=wait,
+        )
+        logger.warning(f"Written Q/A to {result}")
+        root_uri = result.get("root_uri", "")
+        if wait:
+            try:
+                client.wait_processed()
+            except Exception:
+                pass
+        return {
+            "file_path": str(file_path),
+            "root_uri": str(root_uri),
+            "category": safe_category,
+        }
 
     # ── Simple semantic search (find) ─────────────────────────────────────────
 

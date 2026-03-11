@@ -525,6 +525,8 @@ class GameCSStore:
             "total_customers": int(total_customers),
             "open_customers": int(open_customers),
             "closed_customers": int(closed_customers),
+            "ai_auto_reply_enabled_customers": int(open_customers),
+            "ai_auto_reply_disabled_customers": int(closed_customers),
             "bound_customers": int(bound_customers),
             "active_24h": int(active_24h),
             "pending_human_queries": int(pending_human_queries),

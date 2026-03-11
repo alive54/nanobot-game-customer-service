@@ -137,8 +137,8 @@ set NANOBOT_GAME_CS_ADMIN_TOKEN=replace-with-strong-token
 - 查看某个客户最近消息
 - 给某个客户主动发消息
 - 重置某个客户会话
-- 强制关闭某个客户
-- 重新打开某个已关闭客户
+- 关闭某个客户的 AI 自动接待
+- 恢复某个客户的 AI 自动接待
 - 查看人工待处理工单
 - 对人工工单直接回复
 
@@ -160,8 +160,8 @@ set NANOBOT_GAME_CS_ADMIN_TOKEN=replace-with-strong-token
 - 查看客户 `player_1001` 最近消息
 - 给客户 `player_1001` 发消息：请重新登录后再试
 - 重置客户 `player_1001` 的会话
-- 关闭客户 `player_1001`
-- 重新打开客户 `player_1001`
+- 关闭客户 `player_1001` 的 AI 自动接待
+- 恢复客户 `player_1001` 的 AI 自动接待
 - 查看待人工处理工单
 - 回复工单 `42`：请提供角色截图，我帮你继续处理
 
@@ -359,7 +359,7 @@ curl -X POST http://127.0.0.1:8011/admin/customer/player_1001/reset ^
 
 #### `POST /admin/customer/{user_id}/close`
 
-关闭或重新打开客户。
+关闭或恢复某个客户的 AI 自动接待。
 
 关闭：
 
@@ -370,7 +370,7 @@ curl -X POST http://127.0.0.1:8011/admin/customer/player_1001/close ^
   -d "{\"closed\":true}"
 ```
 
-重新打开：
+恢复：
 
 ```bash
 curl -X POST http://127.0.0.1:8011/admin/customer/player_1001/close ^
@@ -381,8 +381,9 @@ curl -X POST http://127.0.0.1:8011/admin/customer/player_1001/close ^
 
 说明：
 
-- 被关闭的客户不会被删除
-- 客户再次发来新消息时，系统会自动重新打开该客户
+- `closed=true` 表示关闭 AI 自动接待，后续用户消息不会再触发自动回复
+- 用户消息仍会被记录，并进入人工处理链路
+- `closed=false` 表示恢复 AI 自动接待
 
 ### 8.3 人工工单管理
 
@@ -471,6 +472,8 @@ curl -X POST http://127.0.0.1:18790/message ^
 set GAME_CS_SERVICE_TOKEN=test-token
 set GAME_CS_AI_ENABLED=true
 python -m nanobot.game_cs.service --host 127.0.0.1 --port 8011
+
+
 ```
 
 终端 2：

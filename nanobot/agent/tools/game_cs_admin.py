@@ -250,7 +250,7 @@ class GameCSCloseCustomerTool(_GameCSAdminHTTPTool):
 
     @property
     def description(self) -> str:
-        return "Close a customer session without deleting its history."
+        return "Disable AI auto reply for a customer so only human admins handle future messages."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -259,7 +259,7 @@ class GameCSCloseCustomerTool(_GameCSAdminHTTPTool):
             "properties": {
                 "user_id": {
                     "type": "string",
-                    "description": "Customer user_id to close.",
+                    "description": "Customer user_id whose AI auto reply should be disabled.",
                 }
             },
             "required": ["user_id"],
@@ -280,7 +280,7 @@ class GameCSReopenCustomerTool(_GameCSAdminHTTPTool):
 
     @property
     def description(self) -> str:
-        return "Reopen a previously closed customer session."
+        return "Re-enable AI auto reply for a customer previously switched to manual handling."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -289,7 +289,7 @@ class GameCSReopenCustomerTool(_GameCSAdminHTTPTool):
             "properties": {
                 "user_id": {
                     "type": "string",
-                    "description": "Customer user_id to reopen.",
+                    "description": "Customer user_id whose AI auto reply should be re-enabled.",
                 }
             },
             "required": ["user_id"],
@@ -379,6 +379,52 @@ class GameCSHumanReplyTool(_GameCSAdminHTTPTool):
         )
 
 
+class GameCSAddKBQATool(_GameCSAdminHTTPTool):
+    @property
+    def name(self) -> str:
+        return "game_cs_add_kb_qa"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Add one reviewed question-answer entry into the game customer-service knowledge base."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "Question text to store in the KB.",
+                },
+                "answer": {
+                    "type": "string",
+                    "description": "Approved answer text to store in the KB.",
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Optional category such as faq.",
+                },
+            },
+            "required": ["question", "answer"],
+        }
+
+    async def execute(
+        self,
+        question: str,
+        answer: str,
+        category: str = "faq",
+        **_: Any,
+    ) -> str:
+        return await self._request(
+            "POST",
+            "/kb/qa",
+            json_body={"question": question, "answer": answer, "category": category},
+        )
+
+
 class GameCSAdminTool(_GameCSAdminHTTPTool):
     """Legacy multiplexer kept for compatibility with existing imports/tests."""
 
@@ -410,12 +456,16 @@ class GameCSAdminTool(_GameCSAdminHTTPTool):
                         "reopen_customer",
                         "list_human_queries",
                         "human_reply",
+                        "add_kb_qa",
                     ],
                     "description": "Legacy management operation to run.",
                 },
                 "user_id": {"type": "string"},
                 "reply": {"type": "string"},
                 "query_id": {"type": "integer"},
+                "question": {"type": "string"},
+                "answer": {"type": "string"},
+                "category": {"type": "string"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 500},
                 "include_closed": {"type": "boolean"},
                 "sop_state": {"type": "string"},
@@ -440,6 +490,9 @@ class GameCSAdminTool(_GameCSAdminHTTPTool):
         message_limit: int = 20,
         human_query_limit: int = 20,
         status: str | None = None,
+        question: str | None = None,
+        answer: str | None = None,
+        category: str = "faq",
         **_: Any,
     ) -> str:
         if action == "stats":
@@ -497,6 +550,14 @@ class GameCSAdminTool(_GameCSAdminHTTPTool):
                 query_id=query_id,
                 reply=reply,
             )
+        if action == "add_kb_qa":
+            if not question or not answer:
+                return "Error: question and answer are required for add_kb_qa"
+            return await GameCSAddKBQATool(self.base_url, self.token, self.timeout_s).execute(
+                question=question,
+                answer=answer,
+                category=category,
+            )
         return f"Error: unsupported action '{action}'"
 
 
@@ -512,4 +573,5 @@ def build_game_cs_admin_tools(base_url: str, token: str, timeout_s: float = 10.0
         GameCSReopenCustomerTool(base_url=base_url, token=token, timeout_s=timeout_s),
         GameCSListHumanQueriesTool(base_url=base_url, token=token, timeout_s=timeout_s),
         GameCSHumanReplyTool(base_url=base_url, token=token, timeout_s=timeout_s),
+        GameCSAddKBQATool(base_url=base_url, token=token, timeout_s=timeout_s),
     ]

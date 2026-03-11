@@ -69,7 +69,7 @@ async def _run(channel_name: str, host: str, port: int) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--channel", default="mochat", help="Channel name: mowebchat | mochat | dingtalk"
+        "--channel", default="mowebchat", help="Channel name: mowebchat | mochat | dingtalk"
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8011)
