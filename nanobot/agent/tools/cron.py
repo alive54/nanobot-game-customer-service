@@ -1,10 +1,12 @@
 """Cron tool for scheduling reminders and tasks."""
 
+from datetime import datetime
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronSchedule
+from nanobot.utils.time import DEFAULT_TIMEZONE_NAME, ensure_beijing_timezone
 
 
 class CronTool(Tool):
@@ -106,11 +108,10 @@ class CronTool(Tool):
         if every_seconds:
             schedule = CronSchedule(kind="every", every_ms=every_seconds * 1000)
         elif cron_expr:
-            schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz)
+            schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz or DEFAULT_TIMEZONE_NAME)
         elif at:
-            from datetime import datetime
-
             dt = datetime.fromisoformat(at)
+            dt = ensure_beijing_timezone(dt)
             at_ms = int(dt.timestamp() * 1000)
             schedule = CronSchedule(kind="at", at_ms=at_ms)
             delete_after = True

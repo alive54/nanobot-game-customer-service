@@ -11,7 +11,7 @@ import re
 import threading
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronSchedule
 
+from ..utils.time import now_datetime, now_iso
 from .config import GameCSConfig
 from .human_escalation import forward_to_admin
 from .intent import CollectingIntent, classify_collecting_intent
@@ -129,11 +130,11 @@ class KBQAIn(BaseModel):
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return now_datetime()
 
 
 def _now_iso() -> str:
-    return _now().isoformat()
+    return now_iso()
 
 
 def _now_ms() -> int:
@@ -427,7 +428,7 @@ def _handle_message(
             default_game_name=cfg.default_game_name,
         )
 
-    session = store.get_or_create_session(user_id, default_game_name=cfg.default_game_name)
+    # session = store.get_or_create_session(user_id, default_game_name=cfg.default_game_name)
     if session.is_closed:
         question = user_text or "用户发送了一条新消息，请人工处理。"
         query_id = store.create_human_query(user_id, question)
@@ -480,6 +481,7 @@ def _handle_message(
             timestamp=_now(),
         )
 
+    logger.info(f"session: {session}")
     if session.sop_state == SOPState.GREETING:
         if not user_text and not screenshot_path and not payload.screenshot_url:
             return _reply(_tmpl(SOPState.GREETING, personality), next_step="提供区服和角色名")
@@ -490,7 +492,26 @@ def _handle_message(
         )
 
     if session.sop_state == SOPState.COLLECTING_INFO:
-        area, role = _parse_user_info(user_text)
+        area, role = None, None
+        # 优先使用 AI 提取信息
+        if cfg.ai_enabled and ai_runtime is not None and user_text:
+            ai_result = _ai_run_sync(
+                ai_runtime,
+                "extract_info_sync",
+                f"game_cs:{user_id}",
+                user_text,
+                timeout_ms=cfg.ai_timeout_ms,
+            )
+            if isinstance(ai_result, dict):
+                if ai_result.get("confidence", 0.0) >= cfg.ai_info_extract_confidence_threshold:
+                    area = ai_result.get("area_name")
+                    role = ai_result.get("role_name")
+            elif ai_result:
+                return _reply(str(ai_result))
+        # AI 未开启或未提取到信息时，使用正则匹配
+        # if not area and not role:
+        #     area, role = _parse_user_info(user_text)
+        # 视觉识别作为补充
         if cfg.vision_enabled and (
             payload.screenshot_url or payload.screenshot_b64 or screenshot_path
         ):
@@ -507,20 +528,6 @@ def _handle_message(
             if vision_result.get("confidence", 0.0) >= cfg.ai_info_extract_confidence_threshold:
                 area = area or vision_result.get("area_name")
                 role = role or vision_result.get("role_name")
-        if cfg.ai_enabled and ai_runtime is not None and (not area or not role) and user_text:
-            ai_result = _ai_run_sync(
-                ai_runtime,
-                "extract_info_sync",
-                f"game_cs:{user_id}",
-                user_text,
-                timeout_ms=cfg.ai_timeout_ms,
-            )
-            if isinstance(ai_result, dict):
-                if ai_result.get("confidence", 0.0) >= cfg.ai_info_extract_confidence_threshold:
-                    area = area or ai_result.get("area_name")
-                    role = role or ai_result.get("role_name")
-            elif ai_result:
-                return _reply(str(ai_result))
 
         prev_area = bool(session.area_name)
         prev_role = bool(session.role_name)
@@ -761,6 +768,7 @@ def _kb_reply(
                         10.0,
                     )
                 else:
+
                     def _forward_runner_ai() -> None:
                         try:
                             asyncio.run(
@@ -774,7 +782,9 @@ def _kb_reply(
                                 )
                             )
                         except Exception:
-                            logger.exception("forward_to_admin (ai-triggered) background thread failed")
+                            logger.exception(
+                                "forward_to_admin (ai-triggered) background thread failed"
+                            )
 
                     threading.Thread(target=_forward_runner_ai, daemon=True).start()
                 _schedule_unique_one_shot(
@@ -1212,7 +1222,7 @@ def create_app(
     channel=None,
 ) -> FastAPI:
     cfg = config or GameCSConfig.from_env()
-    store = GameCSStore(cfg.db_path)
+    store = GameCSStore(cfg)
     kb = OpenVikingKB(cfg.openviking_path, cfg.openviking_target_uri)
 
     _ai_runtime = None
@@ -1250,7 +1260,7 @@ def create_app(
         return None
 
     _cron_service = CronService(
-        store_path=cfg.db_path.parent / "game_cs_cron_jobs.json",
+        store_path=cfg.data_dir / "game_cs_cron_jobs.json",
         on_job=_on_cron_job,
     )
 
@@ -1414,7 +1424,10 @@ def create_app(
                 "ai_enabled": bool(_cfg_box[0].ai_enabled),
                 "admin_gateway_enabled": bool(_cfg_box[0].admin_gateway_enabled),
                 "bridge_connected": _bridge is not None,
-                "db_path": str(_cfg_box[0].db_path),
+                "db_driver": _cfg_box[0].db_driver,
+                "db_host": _cfg_box[0].db_host,
+                "db_port": _cfg_box[0].db_port,
+                "db_name": _cfg_box[0].db_name,
             },
             "summary": summary,
         }
@@ -1451,14 +1464,18 @@ def create_app(
         if x_game_cs_token != _cfg_box[0].service_token:
             raise HTTPException(status_code=401, detail="invalid token")
         _safe_user_id(user_id)
-        session = store.get_or_create_session(user_id, default_game_name=_cfg_box[0].default_game_name)
+        session = store.get_or_create_session(
+            user_id, default_game_name=_cfg_box[0].default_game_name
+        )
         human_queries = [
             item for item in store.get_pending_queries_all() if str(item.get("user_id")) == user_id
         ][: max(1, min(human_query_limit, 50))]
         return {
             "ok": True,
             "customer": _session_to_dict(session),
-            "recent_messages": store.get_session_messages(user_id, limit=max(1, min(message_limit, 50))),
+            "recent_messages": store.get_session_messages(
+                user_id, limit=max(1, min(message_limit, 50))
+            ),
             "human_queries": human_queries,
         }
 

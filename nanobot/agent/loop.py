@@ -7,7 +7,6 @@ import json
 import os
 import re
 import weakref
-from datetime import datetime
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -29,6 +28,7 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
+from nanobot.utils.time import now_compact_timestamp, now_datetime, now_iso
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig
@@ -475,7 +475,7 @@ class AgentLoop:
         )
 
         # Debug: save messages to file with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        timestamp = now_compact_timestamp()
         debug_dir = Path("debug_messages")
         debug_dir.mkdir(exist_ok=True)
         debug_file = debug_dir / f"messages_{timestamp}.json"
@@ -513,7 +513,6 @@ class AgentLoop:
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
-        from datetime import datetime
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
@@ -531,9 +530,9 @@ class AgentLoop:
                             and c.get("image_url", {}).get("url", "").startswith("data:image/")
                         ) else c for c in content
                     ]
-            entry.setdefault("timestamp", datetime.now().isoformat())
+            entry.setdefault("timestamp", now_iso())
             session.messages.append(entry)
-        session.updated_at = datetime.now()
+        session.updated_at = now_datetime()
 
     async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""

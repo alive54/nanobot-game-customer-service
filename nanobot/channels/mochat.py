@@ -6,7 +6,6 @@ import asyncio
 import json
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any
 
 import httpx
@@ -17,6 +16,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import MochatConfig
 from nanobot.utils.helpers import get_data_path
+from nanobot.utils.time import now_iso, parse_datetime
 
 try:
     import socketio
@@ -99,7 +99,7 @@ def _make_synthetic_event(
         payload["authorInfo"] = _safe_dict(author_info)
     return {
         "type": "message.add",
-        "timestamp": timestamp or datetime.utcnow().isoformat(),
+        "timestamp": timestamp or now_iso(),
         "payload": payload,
     }
 
@@ -203,7 +203,8 @@ def parse_timestamp(value: Any) -> int | None:
     if not isinstance(value, str) or not value.strip():
         return None
     try:
-        return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1000)
+        parsed = parse_datetime(value)
+        return int(parsed.timestamp() * 1000) if parsed else None
     except ValueError:
         return None
 
@@ -692,7 +693,7 @@ class MochatChannel(BaseChannel):
 
         entry = MochatBufferedEntry(
             raw_body=raw_body, author=author, sender_name=sender_name,
-            sender_username=sender_username, timestamp=parse_timestamp(event.get("timestamp")),
+            sender_username=sender_username, timestamp=now_iso(),
             message_id=message_id, group_id=group_id,
         )
 
@@ -848,7 +849,7 @@ class MochatChannel(BaseChannel):
         try:
             self._state_dir.mkdir(parents=True, exist_ok=True)
             self._cursor_path.write_text(json.dumps({
-                "schemaVersion": 1, "updatedAt": datetime.utcnow().isoformat(),
+                "schemaVersion": 1, "updatedAt": now_iso(),
                 "cursors": self._session_cursor,
             }, ensure_ascii=False, indent=2) + "\n", "utf-8")
         except Exception as e:

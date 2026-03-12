@@ -202,14 +202,24 @@ HTML_PAGE = """<!doctype html>
         target: document.getElementById('target').value.trim(),
         token: document.getElementById('token').value.trim()
       };
-      const resp = await fetch('/api/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const data = await resp.json();
-      replyEl.textContent = JSON.stringify(data, null, 2);
-      setStatus(data.ok ? '直连发送成功' : '直连发送失败', data.ok);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      try {
+        const resp = await fetch('/api/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: controller.signal
+        });
+        const data = await resp.json();
+        replyEl.textContent = JSON.stringify(data, null, 2);
+        setStatus(data.ok ? '直连发送成功' : '直连发送失败', data.ok);
+      } catch (err) {
+        replyEl.textContent = err.name === 'AbortError' ? '请求超时' : '请求失败: ' + String(err);
+        setStatus('直连发送失败', false);
+      } finally {
+        clearTimeout(timeoutId);
+      }
     }
 
     async function refreshInbox() {

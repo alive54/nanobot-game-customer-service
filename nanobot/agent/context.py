@@ -4,13 +4,12 @@ import base64
 import mimetypes
 import platform
 import re
-import time
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
+from nanobot.utils.time import now_datetime
 
 
 class ContextBuilder:
@@ -151,9 +150,8 @@ Reminder: commit your changes in this workspace after edits.
     @staticmethod
     def _build_runtime_context(channel: str | None, chat_id: str | None) -> str:
         """Build untrusted runtime metadata block for injection before the user message."""
-        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
-        tz = time.strftime("%Z") or "UTC"
-        lines = [f"Current Time: {now} ({tz})"]
+        now = now_datetime().strftime("%Y-%m-%d %H:%M (%A)")
+        lines = [f"Current Time: {now} (Asia/Shanghai, 北京时间)"]
         if channel and chat_id:
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)

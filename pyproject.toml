@@ -59,6 +59,7 @@ game_cs = [
     "openviking>=0.2.1,<0.3.0",
     "fastapi>=0.116.0,<1.0.0",
     "uvicorn[standard]>=0.35.0,<1.0.0",
+    "PyMySQL>=1.1.1,<2.0.0",
 ]
 
 [project.scripts]

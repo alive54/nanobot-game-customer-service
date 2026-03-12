@@ -1,8 +1,9 @@
 """Utility functions for nanobot."""
 
 import re
-from datetime import datetime
 from pathlib import Path
+
+from nanobot.utils.time import now_iso
 
 
 def ensure_dir(path: Path) -> Path:
@@ -24,7 +25,7 @@ def get_workspace_path(workspace: str | None = None) -> Path:
 
 def timestamp() -> str:
     """Current ISO timestamp."""
-    return datetime.now().isoformat()
+    return now_iso()
 
 
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')

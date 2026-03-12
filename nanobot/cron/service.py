@@ -11,6 +11,7 @@ from typing import Any, Callable, Coroutine
 from loguru import logger
 
 from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronSchedule, CronStore
+from nanobot.utils.time import BEIJING_TZ, DEFAULT_TIMEZONE_NAME
 
 
 def _now_ms() -> int:
@@ -36,7 +37,7 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
 
             # Use caller-provided reference time for deterministic scheduling
             base_time = now_ms / 1000
-            tz = ZoneInfo(schedule.tz) if schedule.tz else datetime.now().astimezone().tzinfo
+            tz = ZoneInfo(schedule.tz) if schedule.tz else BEIJING_TZ
             base_dt = datetime.fromtimestamp(base_time, tz=tz)
             cron = croniter(schedule.expr, base_dt)
             next_dt = cron.get_next(datetime)
@@ -59,6 +60,9 @@ def _validate_schedule_for_add(schedule: CronSchedule) -> None:
             ZoneInfo(schedule.tz)
         except Exception:
             raise ValueError(f"unknown timezone '{schedule.tz}'") from None
+
+    if schedule.kind == "cron" and not schedule.tz:
+        schedule.tz = DEFAULT_TIMEZONE_NAME
 
 
 class CronService:

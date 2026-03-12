@@ -10,6 +10,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.utils.helpers import ensure_dir, safe_filename
+from nanobot.utils.time import now_datetime, now_iso, parse_datetime
 
 
 @dataclass
@@ -26,8 +27,8 @@ class Session:
 
     key: str  # channel:chat_id
     messages: list[dict[str, Any]] = field(default_factory=list)
-    created_at: datetime = field(default_factory=datetime.now)
-    updated_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=now_datetime)
+    updated_at: datetime = field(default_factory=now_datetime)
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
 
@@ -36,11 +37,11 @@ class Session:
         msg = {
             "role": role,
             "content": content,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": now_iso(),
             **kwargs
         }
         self.messages.append(msg)
-        self.updated_at = datetime.now()
+        self.updated_at = now_datetime()
 
     def get_history(self, max_messages: int = 10) -> list[dict[str, Any]]:
         """Return unconsolidated messages for LLM input, aligned to a user turn."""
@@ -66,7 +67,7 @@ class Session:
         """Clear all messages and reset session to initial state."""
         self.messages = []
         self.last_consolidated = 0
-        self.updated_at = datetime.now()
+        self.updated_at = now_datetime()
 
 
 class SessionManager:
@@ -143,7 +144,7 @@ class SessionManager:
 
                     if data.get("_type") == "metadata":
                         metadata = data.get("metadata", {})
-                        created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
+                        created_at = parse_datetime(data.get("created_at"))
                         last_consolidated = data.get("last_consolidated", 0)
                     else:
                         messages.append(data)
@@ -151,7 +152,7 @@ class SessionManager:
             return Session(
                 key=key,
                 messages=messages,
-                created_at=created_at or datetime.now(),
+                created_at=created_at or now_datetime(),
                 metadata=metadata,
                 last_consolidated=last_consolidated
             )

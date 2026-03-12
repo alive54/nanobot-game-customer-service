@@ -44,7 +44,14 @@ class _EscalateKB(_DummyKB):
 def _make_cfg(db_path: Path) -> GameCSConfig:
     return GameCSConfig(
         service_token="test-token",
+        db_driver="sqlite",
         db_path=db_path,
+        db_host="localhost",
+        db_port=3306,
+        db_user="root",
+        db_password="root",
+        db_name="nanobot_game_cs_test",
+        data_dir=db_path.parent,
         uploads_dir=db_path.parent / "uploads",
         openviking_path=db_path.parent / "openviking",
         openviking_target_uri="viking://test/",

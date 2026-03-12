@@ -21,6 +21,7 @@ from rich.text import Text
 from nanobot import __logo__, __version__
 from nanobot.config.schema import Config
 from nanobot.utils.helpers import sync_workspace_templates
+from nanobot.utils.time import DEFAULT_TIMEZONE_NAME, ensure_beijing_timezone
 
 app = typer.Typer(
     name="nanobot",
@@ -966,11 +967,12 @@ def cron_add(
     if every:
         schedule = CronSchedule(kind="every", every_ms=every * 1000)
     elif cron_expr:
-        schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz)
+        schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz or DEFAULT_TIMEZONE_NAME)
     elif at:
         import datetime
 
         dt = datetime.datetime.fromisoformat(at)
+        dt = ensure_beijing_timezone(dt)
         schedule = CronSchedule(kind="at", at_ms=int(dt.timestamp() * 1000))
     else:
         console.print("[red]Error: Must specify --every, --cron, or --at[/red]")

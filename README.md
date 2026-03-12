@@ -93,7 +93,13 @@ set GAME_CS_AI_ENABLED=true
 推荐再配置：
 
 ```bash
-set GAME_CS_DB_PATH=.nanobot/game_cs.db
+set GAME_CS_DB_DRIVER=mysql
+set GAME_CS_DB_HOST=localhost
+set GAME_CS_DB_PORT=3306
+set GAME_CS_DB_USER=root
+set GAME_CS_DB_PASSWORD=root
+set GAME_CS_DB_NAME=nanobot_game_cs
+set GAME_CS_DATA_DIR=.nanobot
 set GAME_CS_UPLOADS_DIR=.nanobot/game_cs_uploads
 set GAME_CS_OPENVIKING_PATH=.nanobot/openviking_data
 set GAME_CS_OPENVIKING_TARGET_URI=viking://resources/game-cs/
