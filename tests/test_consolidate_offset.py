@@ -128,6 +128,28 @@ class TestSessionImmutableHistory:
         history2 = session.get_history(max_messages=10)
         assert history1 == history2
 
+    def test_get_history_preserves_tool_call_assistant_context(self) -> None:
+        """Tool results must keep the preceding assistant tool_calls message."""
+        session = Session(key="test:tool-history")
+        session.add_message("user", "check order")
+        session.add_message(
+            "assistant",
+            "",
+            tool_calls=[{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "lookup_order", "arguments": "{\"order_id\":\"123\"}"},
+            }],
+        )
+        session.add_message("tool", "{\"status\":\"paid\"}", tool_call_id="call_1", name="lookup_order")
+        session.add_message("assistant", "Order 123 is paid.")
+
+        history = session.get_history(max_messages=2)
+
+        assert [msg["role"] for msg in history] == ["assistant", "tool", "assistant"]
+        assert history[0]["tool_calls"][0]["id"] == "call_1"
+        assert history[1]["tool_call_id"] == "call_1"
+
     def test_messages_list_never_modified(self) -> None:
         """Test that messages list is never modified after creation."""
         session = create_session_with_messages("test:immutable", 5)

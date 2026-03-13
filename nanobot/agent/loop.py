@@ -233,7 +233,7 @@ class AgentLoop:
 
         while iteration < self.max_iterations:
             iteration += 1
-
+            logger.info("Agent loop messages: {}", json.dumps(messages, ensure_ascii=False))
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),

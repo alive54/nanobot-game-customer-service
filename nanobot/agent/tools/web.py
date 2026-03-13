@@ -2,10 +2,9 @@
 
 import html
 import json
-import os
 import re
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 from loguru import logger
@@ -45,59 +44,51 @@ def _validate_url(url: str) -> tuple[bool, str]:
 
 
 class WebSearchTool(Tool):
-    """Search the web using Brave Search API."""
+    """Search the web or extract URL content using Jina AI."""
 
     name = "web_search"
-    description = "Search the web. Returns titles, URLs, and snippets."
+    description = "Search the web or extract a URL with Jina AI."
     parameters = {
         "type": "object",
         "properties": {
-            "query": {"type": "string", "description": "Search query"},
+            "query": {"type": "string", "description": "Search query or URL"},
             "count": {"type": "integer", "description": "Results (1-10)", "minimum": 1, "maximum": 10}
         },
         "required": ["query"]
     }
 
     def __init__(self, api_key: str | None = None, max_results: int = 5, proxy: str | None = None):
-        self._init_api_key = api_key
+        self.api_key = api_key or "jina_8c9175813b074d65ad8f4baa76162b25G4Zd9gLPqBc1MQx9Kkh5b01_uGJ8"
         self.max_results = max_results
         self.proxy = proxy
 
-    @property
-    def api_key(self) -> str:
-        """Resolve API key at call time so env/config changes are picked up."""
-        return self._init_api_key or os.environ.get("BRAVE_API_KEY", "")
-
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        if not self.api_key:
-            return (
-                "Error: Brave Search API key not configured. Set it in "
-                "~/.nanobot/config.json under tools.web.search.apiKey "
-                "(or export BRAVE_API_KEY), then restart the gateway."
-            )
-
         try:
             n = min(max(count or self.max_results, 1), 10)
             logger.debug("WebSearch: {}", "proxy enabled" if self.proxy else "direct connection")
+            headers = {"Accept": "text/plain"}
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+
             async with httpx.AsyncClient(proxy=self.proxy) as client:
-                r = await client.get(
-                    "https://api.search.brave.com/res/v1/web/search",
-                    params={"q": query, "count": n},
-                    headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
-                    timeout=10.0
-                )
+                is_url, _ = _validate_url(query)
+                if is_url:
+                    target = f"https://r.jina.ai/{query}"
+                    r = await client.get(target, headers=headers, timeout=30.0)
+                else:
+                    target = f"https://s.jina.ai/{quote(query, safe='')}"
+                    r = await client.get(
+                        target,
+                        params={"count": n},
+                        headers=headers,
+                        timeout=30.0,
+                    )
                 r.raise_for_status()
 
-            results = r.json().get("web", {}).get("results", [])[:n]
-            if not results:
+            text = r.text.strip()
+            if not text:
                 return f"No results for: {query}"
-
-            lines = [f"Results for: {query}\n"]
-            for i, item in enumerate(results, 1):
-                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
-                if desc := item.get("description"):
-                    lines.append(f"   {desc}")
-            return "\n".join(lines)
+            return text
         except httpx.ProxyError as e:
             logger.error("WebSearch proxy error: {}", e)
             return f"Proxy error: {e}"

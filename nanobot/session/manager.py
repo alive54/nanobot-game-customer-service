@@ -44,15 +44,27 @@ class Session:
         self.updated_at = now_datetime()
 
     def get_history(self, max_messages: int = 10) -> list[dict[str, Any]]:
-        """Return unconsolidated messages for LLM input, aligned to a user turn."""
+        """Return unconsolidated messages for LLM input without orphaning tool messages."""
         unconsolidated = self.messages[self.last_consolidated:]
-        sliced = unconsolidated[-max_messages:]
+        start = max(0, len(unconsolidated) - max_messages)
 
-        # Drop leading non-user messages to avoid orphaned tool_result blocks
-        for i, m in enumerate(sliced):
-            if m.get("role") == "user":
-                sliced = sliced[i:]
+        # If the window starts inside a tool result block, expand backward so the
+        # corresponding assistant tool_calls message is preserved.
+        while start > 0 and unconsolidated[start].get("role") == "tool":
+            start -= 1
+
+        sliced = unconsolidated[start:]
+
+        # Keep user-turn alignment for ordinary history windows, but never drop
+        # the assistant message that introduced tool_calls for included tool
+        # results.
+        while sliced:
+            first = sliced[0]
+            if first.get("role") == "user":
                 break
+            if first.get("role") == "assistant" and first.get("tool_calls"):
+                break
+            sliced = sliced[1:]
 
         out: list[dict[str, Any]] = []
         for m in sliced:
